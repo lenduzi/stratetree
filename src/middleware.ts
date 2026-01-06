@@ -29,14 +29,22 @@ export async function middleware(request: NextRequest) {
                         value,
                         ...options,
                     })
+
+                    // Capture current response cookies before overwriting
+                    const previousCookies = response.cookies.getAll();
+
                     response = NextResponse.next({
                         request: {
                             headers: request.headers,
                         },
                     })
 
-                    // Copy existing cookies to the new response to prevent data loss 
-                    // (e.g. partial chunks of a larger token)
+                    // Restore previous cookies
+                    previousCookies.forEach(cookie => {
+                        response.cookies.set(cookie)
+                    })
+
+                    // Set new cookie
                     response.cookies.set({
                         name,
                         value,
@@ -49,11 +57,21 @@ export async function middleware(request: NextRequest) {
                         value: '',
                         ...options,
                     })
+
+                    // Capture current response cookies
+                    const previousCookies = response.cookies.getAll();
+
                     response = NextResponse.next({
                         request: {
                             headers: request.headers,
                         },
                     })
+
+                    // Restore previous cookies
+                    previousCookies.forEach(cookie => {
+                        response.cookies.set(cookie)
+                    })
+
                     response.cookies.set({
                         name,
                         value: '',
