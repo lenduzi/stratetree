@@ -34,6 +34,9 @@ export async function middleware(request: NextRequest) {
                             headers: request.headers,
                         },
                     })
+
+                    // Copy existing cookies to the new response to prevent data loss 
+                    // (e.g. partial chunks of a larger token)
                     response.cookies.set({
                         name,
                         value,
