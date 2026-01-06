@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Project, TreeNode } from '@/lib/types';
 import { getProject, saveProject } from '@/lib/db';
-import { generateTreeAction } from '@/lib/actions';
+import { generateTreeAction, isServerApiKeyConfigured } from '@/lib/actions';
 import { TreeEditor } from '@/components/TreeEditor';
 import { ThemeToggle } from '@/components/ThemeProvider';
 import { getBrowserApiKey } from '@/lib/settings';

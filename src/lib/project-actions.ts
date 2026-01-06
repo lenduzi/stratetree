@@ -20,7 +20,7 @@ export async function getCloudProjects(): Promise<Project[]> {
         return [];
     }
 
-    return (data || []).map(p => ({
+    return (data || []).map((p: any) => ({
         id: p.id,
         name: p.name,
         description: p.description,
