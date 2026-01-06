@@ -1,58 +1,13 @@
 'use client';
 
-import { useState } from 'react';
-import { supabase } from '@/lib/supabase';
-import { useRouter } from 'next/navigation';
+import { login, signup } from './actions';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
 export default function LoginPage() {
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [message, setMessage] = useState<string | null>(null);
-    const router = useRouter();
-
-    const handleLogin = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setLoading(true);
-        setError(null);
-
-        const { error } = await supabase.auth.signInWithPassword({
-            email,
-            password,
-        });
-
-        if (error) {
-            setError(error.message);
-        } else {
-            router.push('/');
-            router.refresh();
-        }
-        setLoading(false);
-    };
-
-    const handleSignUp = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setLoading(true);
-        setError(null);
-        setMessage(null);
-
-        const { error } = await supabase.auth.signUp({
-            email,
-            password,
-            options: {
-                emailRedirectTo: `${window.location.origin}/auth/callback`,
-            },
-        });
-
-        if (error) {
-            setError(error.message);
-        } else {
-            setMessage('Check your email for the confirmation link!');
-        }
-        setLoading(false);
-    };
+    const searchParams = useSearchParams();
+    const error = searchParams.get('error');
+    const message = searchParams.get('message');
 
     return (
         <div className="focused-view" style={{ justifyContent: 'center', alignItems: 'center' }}>
@@ -68,9 +23,8 @@ export default function LoginPage() {
                         <div>
                             <label style={{ display: 'block', marginBottom: 4, fontSize: '0.85rem' }}>Email</label>
                             <input
+                                name="email"
                                 type="email"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
                                 placeholder="you@example.com"
                                 required
                             />
@@ -78,9 +32,8 @@ export default function LoginPage() {
                         <div>
                             <label style={{ display: 'block', marginBottom: 4, fontSize: '0.85rem' }}>Password</label>
                             <input
+                                name="password"
                                 type="password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
                                 placeholder="••••••••"
                                 required
                             />
@@ -95,16 +48,14 @@ export default function LoginPage() {
 
                         <div className="flex flex-col gap-sm mt-md">
                             <button
+                                formAction={login}
                                 className="btn btn-primary w-full"
-                                onClick={handleLogin}
-                                disabled={loading}
                             >
-                                {loading ? 'Processing...' : 'Sign In'}
+                                Sign In
                             </button>
                             <button
+                                formAction={signup}
                                 className="btn btn-secondary w-full"
-                                onClick={handleSignUp}
-                                disabled={loading}
                             >
                                 Create Account
                             </button>
