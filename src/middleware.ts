@@ -2,6 +2,7 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
+    // Create an unmodified response
     let response = NextResponse.next({
         request: {
             headers: request.headers,
@@ -24,27 +25,14 @@ export async function middleware(request: NextRequest) {
                     return request.cookies.get(name)?.value
                 },
                 set(name: string, value: string, options: CookieOptions) {
+                    // Update request cookies so that subsequent getUser() calls see the new value
                     request.cookies.set({
                         name,
                         value,
                         ...options,
                     })
-
-                    // Capture current response cookies before overwriting
-                    const previousCookies = response.cookies.getAll();
-
-                    response = NextResponse.next({
-                        request: {
-                            headers: request.headers,
-                        },
-                    })
-
-                    // Restore previous cookies
-                    previousCookies.forEach(cookie => {
-                        response.cookies.set(cookie)
-                    })
-
-                    // Set new cookie
+                    // Update the response cookies so the browser saves them
+                    // We DO NOT recreate the response object here to avoid overwriting previous cookies
                     response.cookies.set({
                         name,
                         value,
@@ -57,21 +45,6 @@ export async function middleware(request: NextRequest) {
                         value: '',
                         ...options,
                     })
-
-                    // Capture current response cookies
-                    const previousCookies = response.cookies.getAll();
-
-                    response = NextResponse.next({
-                        request: {
-                            headers: request.headers,
-                        },
-                    })
-
-                    // Restore previous cookies
-                    previousCookies.forEach(cookie => {
-                        response.cookies.set(cookie)
-                    })
-
                     response.cookies.set({
                         name,
                         value: '',
@@ -84,10 +57,14 @@ export async function middleware(request: NextRequest) {
 
     const { data: { user } } = await supabase.auth.getUser()
 
+    // Debug header to help diagnose auth state in production
+    if (user) {
+        response.headers.set('X-Stratetree-Auth', user.id)
+    }
+
     // Protect project routes - redirect to login if no user
     if (!user && (request.nextUrl.pathname.startsWith('/project') || request.nextUrl.pathname === '/')) {
-        // Allow access to home for now to not block user, or force login
-        // Let's force login for anything project related
+        // Force login for project routes
         if (request.nextUrl.pathname.startsWith('/project')) {
             return NextResponse.redirect(new URL('/login', request.url))
         }
