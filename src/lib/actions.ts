@@ -2,7 +2,7 @@
 
 import OpenAI from 'openai';
 import { headers } from 'next/headers';
-import { TreeNode, CallSummary, StructuredBuckets, ScenarioRouterResult, ScenarioType } from './types';
+import { TreeNode, CallSummary, StructuredBuckets, ScenarioRouterResult, ScenarioType, NodeSentiment } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
 // Helper: Add unique IDs and sentiments to all nodes in a tree
@@ -28,6 +28,8 @@ function getOpenAIClient(userApiKey?: string): OpenAI {
 const RATE_LIMIT_MAX = 20;
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+
+const REQUIRED_SENTIMENTS: NodeSentiment[] = ['positive', 'neutral', 'negative'];
 
 const SCENARIO_TREE_TEMPLATES: Record<ScenarioType, string> = {
     salary_negotiation: `Focus on compensation bands, scope, performance, timing, and trade-offs. Keep language professional, data-backed, and non-confrontational.`,
@@ -123,7 +125,11 @@ async function enforceRateLimit(clientId?: string) {
     }
 }
 
-function buildTreeSystemPrompt(router?: ScenarioRouterResult, buckets?: Partial<StructuredBuckets>) {
+function buildTreeSystemPrompt(
+    router?: ScenarioRouterResult,
+    buckets?: Partial<StructuredBuckets>,
+    strictSentiments?: boolean
+) {
     const scenarioContext = buildScenarioContext(router, buckets);
     const scenarioNote = SCENARIO_TREE_TEMPLATES[scenarioContext.scenarioType];
     return `You are an expert call strategist. Generate a decision tree for handling different conversation paths.
@@ -157,10 +163,59 @@ Output a JSON object with this structure:
 IMPORTANT RULES:
 - Each node SHOULD have a "sentiment": "positive", "neutral", or "negative"
 - Each node MUST have 1-3 "questions"
-- Create 2-4 children per node unless it is an explicit end state
+- Every node MUST include 3 counterpart response branches: one positive, one neutral, one negative
 - Neutral branches must keep momentum with a follow-up question or next step
 - Keep titles SHORT (max ~40 chars)
-- Make talking points actionable and natural-sounding`;
+- Make talking points actionable and natural-sounding
+${strictSentiments ? '- If you cannot comply, still output 3 children with one of each sentiment per node.' : ''}`;
+}
+
+function hasAllSentiments(children: TreeNode[]) {
+    const present = new Set(children.map((child) => child.sentiment).filter(Boolean));
+    return REQUIRED_SENTIMENTS.every((sentiment) => present.has(sentiment));
+}
+
+function treeHasSentimentCoverage(node: TreeNode): boolean {
+    if (node.children.length === 0) return false;
+    if (!hasAllSentiments(node.children)) return false;
+    return node.children.every(treeHasSentimentCoverage);
+}
+
+function fallbackSentimentNode(sentiment: NodeSentiment): TreeNode {
+    const titleMap: Record<NodeSentiment, string> = {
+        positive: 'Positive response',
+        neutral: 'Neutral response',
+        negative: 'Pushback',
+    };
+    const talkMap: Record<NodeSentiment, string[]> = {
+        positive: ['Acknowledge the alignment and move forward.'],
+        neutral: ['Stay curious and keep momentum.'],
+        negative: ['Acknowledge concerns and invite specifics.'],
+    };
+    const questionMap: Record<NodeSentiment, string[]> = {
+        positive: ['What would make this a clear yes?'],
+        neutral: ['What would you want to see next?'],
+        negative: ['What’s the biggest concern right now?'],
+    };
+    return {
+        id: uuidv4(),
+        title: titleMap[sentiment],
+        talkingPoints: talkMap[sentiment],
+        questions: questionMap[sentiment],
+        sentiment,
+        children: [],
+    };
+}
+
+function ensureSentimentBranches(node: TreeNode): TreeNode {
+    const children = node.children.map(ensureSentimentBranches);
+    const present = new Set(children.map((child) => child.sentiment).filter(Boolean));
+    const missing = REQUIRED_SENTIMENTS.filter((sentiment) => !present.has(sentiment));
+    const injected = missing.map((sentiment) => fallbackSentimentNode(sentiment));
+    return {
+        ...node,
+        children: [...children, ...injected],
+    };
 }
 
 export async function routeScenarioAction(
@@ -255,7 +310,23 @@ export async function generateTreeAction(
     if (!content) throw new Error('No response from AI');
 
     const parsed = JSON.parse(content);
-    return addIdsToTree(parsed);
+    const tree = addIdsToTree(parsed);
+    if (treeHasSentimentCoverage(tree)) return tree;
+
+    const strictPrompt = buildTreeSystemPrompt(router, undefined, true);
+    const retry = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: strictPrompt },
+            { role: 'user', content: `Scenario: ${scenario}\n\nGenerate a decision tree for this call with discovery questions at each stage.` }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.7,
+    });
+    const retryContent = retry.choices[0]?.message?.content;
+    if (!retryContent) return ensureSentimentBranches(tree);
+    const retryTree = addIdsToTree(JSON.parse(retryContent));
+    return treeHasSentimentCoverage(retryTree) ? retryTree : ensureSentimentBranches(retryTree);
 }
 
 async function extractStructuredBuckets(
@@ -335,7 +406,26 @@ async function generateTreeFromBuckets(
     if (!content) throw new Error('No response from AI');
 
     const parsed = JSON.parse(content);
-    return addIdsToTree(parsed);
+    const tree = addIdsToTree(parsed);
+    if (treeHasSentimentCoverage(tree)) return tree;
+
+    const strictPrompt = buildTreeSystemPrompt(router, buckets, true);
+    const retry = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: strictPrompt },
+            {
+                role: 'user',
+                content: `Goal: ${buckets.goal}\nStakeholder: ${buckets.stakeholder}\nContext: ${buckets.context}\nDecision frame: ${buckets.decisionFrame}`
+            }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.7,
+    });
+    const retryContent = retry.choices[0]?.message?.content;
+    if (!retryContent) return ensureSentimentBranches(tree);
+    const retryTree = addIdsToTree(JSON.parse(retryContent));
+    return treeHasSentimentCoverage(retryTree) ? retryTree : ensureSentimentBranches(retryTree);
 }
 
 export async function structureProjectAction(
@@ -593,7 +683,7 @@ export async function generateNextMovesAction(
     const scenarioContext = buildScenarioContext(router);
 
     const systemPrompt = useFallback
-        ? `Generate 2-4 safe next moves for the current node.
+        ? `Generate 3 next moves for the current node: one positive, one neutral, one negative.
 Keep them generic, calm, and forward-moving. Avoid jargon.
 Each move must be a short, actionable title (max ~40 chars) and include 1-2 "talkingPoints" and 1-2 "questions".
 Return a JSON object using this structure:
@@ -608,7 +698,7 @@ Return a JSON object using this structure:
     }
   ]
 }`
-        : `Generate 2-4 next moves for the current node.
+        : `Generate 3 next moves for the current node: one positive, one neutral, one negative.
 Each move must be a short, actionable title (max ~40 chars) and include 1-2 "talkingPoints" and 1-2 "questions".
 Neutral branches must keep momentum and include a next step.
 ${SCENARIO_TREE_TEMPLATES[scenarioContext.scenarioType]}
@@ -654,8 +744,23 @@ Questions: ${currentNode.questions.join(' | ') || 'None'}`
     if (!content) throw new Error('No response from AI');
 
     const parsed = JSON.parse(content);
-    const nodes = Array.isArray(parsed) ? parsed : parsed.nodes || [];
-    return (nodes as TreeNode[]).map(addIdsToTree);
+    const nodes = (Array.isArray(parsed) ? parsed : parsed.nodes || []) as TreeNode[];
+    const normalized = nodes.map(addIdsToTree);
+    if (hasAllSentiments(normalized)) return normalized;
+    if (!useFallback) {
+        return generateNextMovesAction(
+            currentNode,
+            projectGoal,
+            router,
+            lastMoveLabel,
+            userApiKey,
+            clientId,
+            true
+        );
+    }
+    const present = new Set(normalized.map((node) => node.sentiment).filter(Boolean));
+    const missing = REQUIRED_SENTIMENTS.filter((sentiment) => !present.has(sentiment));
+    return [...normalized, ...missing.map(fallbackSentimentNode)];
 }
 
 export async function generateAskNextAction(

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Project, TreeNode, CallSummary } from '@/lib/types';
+import { Project, TreeNode, CallSummary, NodeSentiment } from '@/lib/types';
 import { PanicButton } from './PanicButton';
 import { findNodeById, getPathToNode, addChildToNode, updateNodeInTree } from '@/lib/hooks';
 import { saveProject } from '@/lib/db';
@@ -48,8 +48,13 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
     const isLowAskNext = questionLines.length < 2;
     const sentimentNudge = lastSelectedSentiment === 'neutral' || lastSelectedSentiment === 'negative';
     const nudgeActive = idleNudge || isLowAskNext || sentimentNudge;
-    const nextMovesNeeded = currentNode.children.length < 2;
-    const nextMovesSkeletonCount = Math.max(0, 2 - currentNode.children.length);
+    const sentimentChildren = {
+        positive: currentNode.children.find((child) => child.sentiment === 'positive') || null,
+        neutral: currentNode.children.find((child) => child.sentiment === 'neutral') || null,
+        negative: currentNode.children.find((child) => child.sentiment === 'negative') || null,
+    };
+    const nextMovesNeeded = !sentimentChildren.positive || !sentimentChildren.neutral || !sentimentChildren.negative;
+    const nextMovesSkeletonCount = Math.max(0, 3 - currentNode.children.length);
 
     useEffect(() => {
         if (selectedIndex >= currentNode.children.length) {
@@ -279,6 +284,27 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
         }
     }, [nextMovesNeeded, handleGenerateNextMoves]);
 
+    const [pendingSentiment, setPendingSentiment] = useState<NodeSentiment | null>(null);
+
+    useEffect(() => {
+        if (!pendingSentiment) return;
+        const child = sentimentChildren[pendingSentiment];
+        if (child) {
+            setPendingSentiment(null);
+            navigateToNode(child.id);
+        }
+    }, [pendingSentiment, sentimentChildren, navigateToNode]);
+
+    const handleSelectResponse = (sentiment: NodeSentiment) => {
+        const child = sentimentChildren[sentiment];
+        if (child) {
+            navigateToNode(child.id);
+        } else {
+            setPendingSentiment(sentiment);
+            handleGenerateNextMoves();
+        }
+    };
+
     const handleAskNextAutogen = useCallback(async () => {
         const now = Date.now();
         const last = lastGeneratedAtRef.current[currentNodeId] || 0;
@@ -463,6 +489,21 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                             ))}
                         </div>
                     )}
+                    <div className="response-toggle">
+                        <span className="response-label">Their response:</span>
+                        <div className="response-buttons">
+                            {(['positive', 'neutral', 'negative'] as NodeSentiment[]).map((sentiment) => (
+                                <button
+                                    key={sentiment}
+                                    className={`response-btn response-${sentiment}${pendingSentiment === sentiment ? ' is-loading' : ''}`}
+                                    onClick={() => handleSelectResponse(sentiment)}
+                                    disabled={isGeneratingNextMoves && pendingSentiment === sentiment}
+                                >
+                                    {sentiment === 'positive' ? 'Positive' : sentiment === 'neutral' ? 'Neutral' : 'Negative'}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
                     <div className="ask-next">
                         <div className="ask-next-label">Ask next</div>
                         <div className="ask-next-list">

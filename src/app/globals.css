@@ -779,6 +779,52 @@ textarea {
   color: var(--text-primary);
 }
 
+.focused-view.call-mode .response-toggle {
+  margin-top: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.focused-view.call-mode .response-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--text-muted);
+}
+
+.focused-view.call-mode .response-buttons {
+  display: flex;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.focused-view.call-mode .response-btn {
+  border: 1px solid var(--border-light);
+  background: transparent;
+  color: var(--text-primary);
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.focused-view.call-mode .response-btn.is-loading {
+  opacity: 0.7;
+}
+
+.focused-view.call-mode .response-positive {
+  border-color: var(--success);
+}
+
+.focused-view.call-mode .response-neutral {
+  border-color: var(--warning);
+}
+
+.focused-view.call-mode .response-negative {
+  border-color: var(--danger);
+}
+
 .focused-view.call-mode .panic-followups {
   margin-top: var(--space-md);
   display: flex;
