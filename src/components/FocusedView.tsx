@@ -3,14 +3,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Project, TreeNode, CallSummary } from '@/lib/types';
-import { NodeCard } from './NodeCard';
-import { Breadcrumb } from './Breadcrumb';
 import { PanicButton } from './PanicButton';
 import { findNodeById, getPathToNode, addChildToNode } from '@/lib/hooks';
 import { saveProject } from '@/lib/db';
 import { generateCallSummaryAction } from '@/lib/actions';
 import { v4 as uuidv4 } from 'uuid';
-import { ThemeToggle } from './ThemeProvider';
 import { getSentimentClass, getSentimentEmoji } from './NodeCard';
 import { getBrowserApiKey } from '@/lib/settings';
 
@@ -26,9 +23,32 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
     const [showFullTree, setShowFullTree] = useState(false);
     const [visitedPath, setVisitedPath] = useState<string[]>([project.rootNode.id]);
     const [showFinishModal, setShowFinishModal] = useState(false);
+    const [showMore, setShowMore] = useState(false);
+    const [panicActiveId, setPanicActiveId] = useState<string | null>(null);
+    const [lastBranchNodeId, setLastBranchNodeId] = useState(project.rootNode.id);
 
     const currentNode = findNodeById(project.rootNode, currentNodeId) || project.rootNode;
     const path = getPathToNode(project.rootNode, currentNodeId) || [project.rootNode];
+    const talkingLines = currentNode.talkingPoints;
+    const questionLines = currentNode.questions || [];
+    const lastBranchNode = findNodeById(project.rootNode, lastBranchNodeId);
+    const effectiveChildren = currentNode.children.length > 0
+        ? currentNode.children
+        : (lastBranchNode?.children || []);
+    const isUsingFallback = currentNode.children.length === 0 && effectiveChildren.length > 0;
+    const visibleOptions = effectiveChildren.slice(0, 4);
+
+    useEffect(() => {
+        if (currentNode.children.length > 0) {
+            setLastBranchNodeId(currentNode.id);
+        }
+    }, [currentNode]);
+
+    useEffect(() => {
+        if (selectedIndex >= effectiveChildren.length) {
+            setSelectedIndex(0);
+        }
+    }, [effectiveChildren.length, selectedIndex]);
 
     // Keyboard navigation
     useEffect(() => {
@@ -39,8 +59,8 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
             // Number keys 1-9 to select option
             if (e.key >= '1' && e.key <= '9') {
                 const index = parseInt(e.key) - 1;
-                if (index < currentNode.children.length) {
-                    const childId = currentNode.children[index].id;
+                if (index < effectiveChildren.length) {
+                    const childId = effectiveChildren[index].id;
                     setCurrentNodeId(childId);
                     setVisitedPath(prev => [...prev, childId]);
                     setSelectedIndex(0);
@@ -55,11 +75,14 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                     break;
                 case 'ArrowDown':
                     e.preventDefault();
-                    setSelectedIndex(prev => Math.min(currentNode.children.length - 1, prev + 1));
+                    setSelectedIndex(prev => {
+                        if (effectiveChildren.length === 0) return 0;
+                        return Math.min(effectiveChildren.length - 1, prev + 1);
+                    });
                     break;
                 case 'Enter':
-                    if (currentNode.children[selectedIndex]) {
-                        const childId = currentNode.children[selectedIndex].id;
+                    if (effectiveChildren[selectedIndex]) {
+                        const childId = effectiveChildren[selectedIndex].id;
                         setCurrentNodeId(childId);
                         setVisitedPath(prev => [...prev, childId]);
                         setSelectedIndex(0);
@@ -88,7 +111,7 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [currentNode, selectedIndex, path, showFullTree, showFinishModal]);
+    }, [currentNode, selectedIndex, path, showFullTree, showFinishModal, effectiveChildren]);
 
     // Handle panic button adding new nodes
     const handlePanicNodes = useCallback(async (newNodes: TreeNode[]) => {
@@ -100,6 +123,12 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
         const updatedProject = { ...project, rootNode: updatedRoot };
         await saveProject(updatedProject);
         onProjectUpdate?.(updatedProject);
+        if (newNodes[0]) {
+            setCurrentNodeId(newNodes[0].id);
+            setVisitedPath(prev => [...prev, newNodes[0].id]);
+            setSelectedIndex(0);
+            setPanicActiveId(newNodes[0].id);
+        }
     }, [project, currentNodeId, onProjectUpdate]);
 
     const navigateToNode = (nodeId: string) => {
@@ -123,29 +152,20 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
     };
 
     return (
-        <div className="focused-view">
+        <div className="focused-view call-mode">
             {/* Header with breadcrumb */}
-            <header className="header">
-                <div className="flex items-center gap-md">
+            <header className="header call-topbar">
+                <div className="call-topbar-title">Call Mode</div>
+                <div className="call-topbar-actions">
+                    <div className="call-cta-panic">
+                        <PanicButton
+                            currentNode={currentNode}
+                            projectContext={project.description}
+                            onNewNodes={handlePanicNodes}
+                        />
+                    </div>
                     <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => router.push(`/project/${project.id}`)}
-                    >
-                        ← Edit
-                    </button>
-                    <Breadcrumb
-                        path={path}
-                        projectId={project.id}
-                        onNavigate={navigateToNode}
-                    />
-                </div>
-                <div className="flex items-center gap-sm">
-                    <ThemeToggle />
-                    <span className="text-muted" style={{ fontSize: '0.8rem' }}>
-                        <span className="kbd">F</span> Full tree
-                    </span>
-                    <button
-                        className="btn btn-primary btn-sm"
+                        className="btn btn-primary btn-sm call-cta-finish"
                         onClick={() => setShowFinishModal(true)}
                     >
                         ✓ Finish Call
@@ -156,97 +176,112 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
             {/* Main content */}
             <main className="focused-content">
                 {/* Current node - what to say now */}
-                <div className={`current-node ${getSentimentClass(currentNode.sentiment)}`}>
+                <div className={`current-node say-now-card ${getSentimentClass(currentNode.sentiment)}`}>
+                    <div className="say-now-header">
+                        <span className="say-now-label">Say this now</span>
+                        <div className="say-now-actions">
+                            {talkingLines.length > 2 && (
+                                <button
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={() => setShowMore((prev) => !prev)}
+                                >
+                                    {showMore ? 'Less' : 'More'}
+                                </button>
+                            )}
+                            <button
+                                className="finish-link"
+                                onClick={() => setShowFinishModal(true)}
+                            >
+                                Finish Call
+                            </button>
+                        </div>
+                    </div>
                     <h1 className="current-node-title">
                         {currentNode.sentiment && <span style={{ marginRight: 8 }}>{getSentimentEmoji(currentNode.sentiment)}</span>}
                         {currentNode.title}
                     </h1>
-
-                    {/* Talking Points */}
-                    {currentNode.talkingPoints.length > 0 && (
-                        <div className="talking-points">
-                            {currentNode.talkingPoints.map((point, i) => (
-                                <div key={i} className="talking-point">
-                                    <span className="talking-point-bullet">•</span>
-                                    <span>{point}</span>
+                    {talkingLines.length > 0 && (
+                        <div className={`say-now-brief ${showMore ? 'expanded' : ''}`}>
+                            {(showMore ? talkingLines : talkingLines.slice(0, 2)).map((line, i) => (
+                                <div key={i} className="say-now-line">
+                                    {line}
                                 </div>
                             ))}
                         </div>
                     )}
-
-                    {/* Discovery Questions */}
-                    {currentNode.questions && currentNode.questions.length > 0 && (
-                        <div className="questions-section" style={{ marginTop: 'var(--space-lg)' }}>
-                            <h3 style={{
-                                fontSize: '0.85rem',
-                                fontWeight: 600,
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.05em',
-                                color: 'var(--accent-secondary)',
-                                marginBottom: 'var(--space-sm)'
-                            }}>
-                                🎯 Ask the Client
-                            </h3>
-                            <div className="talking-points">
-                                {currentNode.questions.map((question, i) => (
-                                    <div key={i} className="talking-point" style={{
-                                        background: 'rgba(99, 102, 241, 0.15)',
-                                        borderLeft: '3px solid var(--accent-primary)'
-                                    }}>
-                                        <span style={{ color: 'var(--accent-secondary)', fontWeight: 600 }}>?</span>
-                                        <span style={{ fontStyle: 'italic' }}>{question}</span>
+                    {questionLines.length > 0 && (
+                        <div className="ask-next">
+                            <div className="ask-next-label">Ask next</div>
+                            <div className="ask-next-list">
+                                {questionLines.map((question, i) => (
+                                    <div key={i} className="ask-next-line">
+                                        {question}
                                     </div>
                                 ))}
                             </div>
                         </div>
                     )}
-                </div>
-
-                {/* Child options - where to go next */}
-                {currentNode.children.length > 0 && (
-                    <section className="options-section">
-                        <h2 className="options-title">
-                            Where is the conversation going?
-                            <span style={{ marginLeft: 8, fontWeight: 400, textTransform: 'none' }}>
-                                (use <span className="kbd">↑</span><span className="kbd">↓</span> or <span className="kbd">1</span>-<span className="kbd">9</span>)
-                            </span>
-                        </h2>
-                        <div className="options-list">
-                            {currentNode.children.map((child, index) => (
-                                <NodeCard
-                                    key={child.id}
-                                    node={child}
-                                    index={index}
-                                    isActive={index === selectedIndex}
-                                    onClick={() => navigateToNode(child.id)}
-                                />
+                    {panicActiveId === currentNodeId && (
+                        <div className="panic-followups">
+                            {['Clarify', 'Reframe', 'Next step'].map((label) => (
+                                <button
+                                    key={label}
+                                    className="panic-followup-btn"
+                                    onClick={async () => {
+                                        const followupNode: TreeNode = {
+                                            id: uuidv4(),
+                                            title: label,
+                                            talkingPoints: [],
+                                            questions: [],
+                                            sentiment: 'neutral',
+                                            children: [],
+                                        };
+                                        const updatedRoot = addChildToNode(project.rootNode, currentNodeId, followupNode);
+                                        const updatedProject = { ...project, rootNode: updatedRoot };
+                                        await saveProject(updatedProject);
+                                        onProjectUpdate?.(updatedProject);
+                                        setCurrentNodeId(followupNode.id);
+                                        setVisitedPath(prev => [...prev, followupNode.id]);
+                                        setSelectedIndex(0);
+                                    }}
+                                >
+                                    {label}
+                                </button>
                             ))}
                         </div>
-                    </section>
-                )}
+                    )}
+                </div>
 
-                {/* No children - end of path */}
-                {currentNode.children.length === 0 && (
-                    <div className="empty-state">
-                        <div className="empty-state-icon">🎯</div>
-                        <div className="empty-state-title">End of path</div>
-                        <p>No more branches from here. Use Panic button if something unexpected comes up, or Finish Call when done.</p>
-                    </div>
-                )}
             </main>
+
+            {/* Next moves dock */}
+            {effectiveChildren.length > 0 && (
+                <section className="options-dock">
+                    <div className="options-dock-title">Next moves</div>
+                    {isUsingFallback && (
+                        <div className="options-fallback-hint">Suggested next</div>
+                    )}
+                    <div className="options-scroll">
+                        {visibleOptions.map((child, index) => (
+                            <button
+                                key={child.id}
+                                className={`next-move-btn ${index === selectedIndex ? 'is-active' : ''}`}
+                                onClick={() => navigateToNode(child.id)}
+                            >
+                                <span className="next-move-title">{child.title}</span>
+                            </button>
+                        ))}
+                    </div>
+                </section>
+            )}
 
             {/* Floating controls */}
             <div className="floating-controls">
                 {path.length > 1 && (
-                    <button className="btn btn-secondary" onClick={goBack}>
+                    <button className="btn btn-secondary call-back-btn" onClick={goBack}>
                         ← Back <span className="kbd" style={{ marginLeft: 4 }}>⌫</span>
                     </button>
                 )}
-                <PanicButton
-                    currentNode={currentNode}
-                    projectContext={project.description}
-                    onNewNodes={handlePanicNodes}
-                />
             </div>
 
             {/* Full tree modal */}

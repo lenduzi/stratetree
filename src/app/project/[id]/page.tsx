@@ -3,9 +3,9 @@
 import { useState, useEffect, use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Project, TreeNode } from '@/lib/types';
+import { Project, StructuredBuckets, TreeNode } from '@/lib/types';
 import { getProject, saveProject } from '@/lib/db';
-import { generateTreeAction, isServerApiKeyConfigured } from '@/lib/actions';
+import { generateTreeAction, isServerApiKeyConfigured, regenerateBucketAction } from '@/lib/actions';
 import { TreeEditor } from '@/components/TreeEditor';
 import { ThemeToggle } from '@/components/ThemeProvider';
 import { getBrowserApiKey } from '@/lib/settings';
@@ -19,6 +19,11 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     const [error, setError] = useState<string | null>(null);
     const [isServerConfigured, setIsServerConfigured] = useState(false);
     const [showConfirmGen, setShowConfirmGen] = useState(false);
+    const [editingKey, setEditingKey] = useState<keyof StructuredBuckets | null>(null);
+    const [draftValue, setDraftValue] = useState('');
+    const [regeneratingKey, setRegeneratingKey] = useState<keyof StructuredBuckets | null>(null);
+    const [showOptional, setShowOptional] = useState(false);
+    const [showRawCapture, setShowRawCapture] = useState(false);
 
     useEffect(() => {
         loadProject();
@@ -71,6 +76,53 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         }
     };
 
+    const startEdit = (key: keyof StructuredBuckets) => {
+        if (!project?.structured) return;
+        setEditingKey(key);
+        setDraftValue(project.structured[key] || '');
+    };
+
+    const saveEdit = async () => {
+        if (!project || !project.structured || !editingKey) return;
+        const nextStructured = { ...project.structured, [editingKey]: draftValue };
+        const nextProject = {
+            ...project,
+            name: editingKey === 'title' ? (draftValue || project.name) : project.name,
+            structured: nextStructured,
+        };
+        setProject(nextProject);
+        await saveProject(nextProject);
+        setEditingKey(null);
+    };
+
+    const handleRegenerate = async (key: keyof StructuredBuckets) => {
+        if (!project?.structured?.rawCapture) return;
+        setRegeneratingKey(key);
+        setError(null);
+        try {
+            const browserKey = getBrowserApiKey();
+            const { value, tree } = await regenerateBucketAction(
+                key,
+                project.structured.rawCapture,
+                project.structured,
+                browserKey || undefined
+            );
+            const nextStructured = { ...project.structured, [key]: value };
+            const nextProject = {
+                ...project,
+                name: key === 'title' ? (value || project.name) : project.name,
+                rootNode: tree || project.rootNode,
+                structured: nextStructured,
+            };
+            setProject(nextProject);
+            await saveProject(nextProject);
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Failed to regenerate');
+        } finally {
+            setRegeneratingKey(null);
+        }
+    };
+
     if (loading) {
         return (
             <div className="focused-view">
@@ -99,6 +151,21 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
     if (!project) return null;
 
+    const structured = project.structured;
+    const isStructured = !!structured?.goal;
+    const requiredBuckets: { key: keyof StructuredBuckets; label: string }[] = [
+        { key: 'goal', label: 'Goal' },
+        { key: 'stakeholder', label: 'Who am I talking to?' },
+        { key: 'context', label: 'What’s the situation?' },
+        { key: 'decisionFrame', label: 'If they say X → I say Y' },
+    ];
+    const optionalBuckets: { key: keyof StructuredBuckets; label: string }[] = [
+        { key: 'redFlags', label: 'Red flags / likely objections' },
+        { key: 'nonNegotiables', label: 'Non-negotiables' },
+        { key: 'tone', label: 'Tone' },
+    ];
+    const hasOptional = optionalBuckets.some((bucket) => structured?.[bucket.key]);
+
     return (
         <div className="focused-view">
             <header className="header">
@@ -115,26 +182,37 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                 </div>
                 <div className="flex items-center gap-sm">
                     <ThemeToggle />
-                    <button
-                        className="btn btn-secondary"
-                        onClick={handleGenerateClick}
-                        disabled={generating}
-                    >
-                        {generating ? (
-                            <>
-                                <span className="spinner" style={{ width: 16, height: 16 }} />
-                                Generating...
-                            </>
-                        ) : (
-                            '✨ Generate with AI'
-                        )}
-                    </button>
-                    <Link
-                        href={`/project/${project.id}/live`}
-                        className="btn btn-primary btn-lg"
-                    >
-                        ▶ Start Live Mode
-                    </Link>
+                    {isStructured ? (
+                        <Link
+                            href={`/project/${project.id}/live`}
+                            className="btn btn-primary btn-lg"
+                        >
+                            ▶ Start Call Mode
+                        </Link>
+                    ) : (
+                        <>
+                            <button
+                                className="btn btn-secondary"
+                                onClick={handleGenerateClick}
+                                disabled={generating}
+                            >
+                                {generating ? (
+                                    <>
+                                        <span className="spinner" style={{ width: 16, height: 16 }} />
+                                        Generating...
+                                    </>
+                                ) : (
+                                    '✨ Generate with AI'
+                                )}
+                            </button>
+                            <Link
+                                href={`/project/${project.id}/live`}
+                                className="btn btn-primary btn-lg"
+                            >
+                                ▶ Start Live Mode
+                            </Link>
+                        </>
+                    )}
                 </div>
             </header>
 
@@ -164,27 +242,167 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                     </div>
                 )}
 
-                {project.description && (
-                    <div className="card mb-lg">
-                        <h3 style={{ marginBottom: 'var(--space-sm)', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-                            Scenario Context
-                        </h3>
-                        <p style={{ margin: 0 }}>{project.description}</p>
-                    </div>
-                )}
+                {isStructured ? (
+                    <div className="overview">
+                        <div className="overview-title">
+                            {editingKey === 'title' ? (
+                                <input
+                                    value={draftValue}
+                                    onChange={(e) => setDraftValue(e.target.value)}
+                                    onBlur={saveEdit}
+                                    autoFocus
+                                />
+                            ) : (
+                                <h1>{project.name}</h1>
+                            )}
+                            <div className="bucket-actions">
+                                <button
+                                    className="bucket-action"
+                                    onClick={() => startEdit('title')}
+                                >
+                                    ✎ Edit
+                                </button>
+                                <button
+                                    className="bucket-action"
+                                    onClick={() => handleRegenerate('title')}
+                                    disabled={regeneratingKey === 'title'}
+                                >
+                                    ↻
+                                </button>
+                            </div>
+                        </div>
 
-                <div className="card">
-                    <div className="flex items-center justify-between mb-md">
-                        <h2 style={{ margin: 0 }}>Decision Tree</h2>
-                        <span className="text-muted" style={{ fontSize: '0.85rem' }}>
-                            Click Edit to modify nodes, + Child to add branches
-                        </span>
+                        <div className="overview-buckets">
+                            {requiredBuckets.map(({ key, label }) => (
+                                <div key={key} className="overview-bucket">
+                                    <div className="bucket-header">
+                                        <span className="bucket-title">{label}</span>
+                                        <div className="bucket-actions">
+                                            <button
+                                                className="bucket-action"
+                                                onClick={() => startEdit(key)}
+                                            >
+                                                ✎ Edit
+                                            </button>
+                                            <button
+                                                className="bucket-action"
+                                                onClick={() => handleRegenerate(key)}
+                                                disabled={regeneratingKey === key}
+                                            >
+                                                ↻
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {editingKey === key ? (
+                                        <textarea
+                                            value={draftValue}
+                                            onChange={(e) => setDraftValue(e.target.value)}
+                                            onBlur={saveEdit}
+                                            autoFocus
+                                            rows={3}
+                                        />
+                                    ) : (
+                                        <div className="bucket-body">
+                                            {structured?.[key] || '—'}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+
+                        {hasOptional && (
+                            <div className="overview-optional">
+                                <button
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={() => setShowOptional((prev) => !prev)}
+                                >
+                                    {showOptional ? 'Hide details' : 'Show details'}
+                                </button>
+                                {showOptional && (
+                                    <div className="overview-buckets mt-md">
+                                        {optionalBuckets.map(({ key, label }) => (
+                                            structured?.[key] ? (
+                                                <div key={key} className="overview-bucket">
+                                                    <div className="bucket-header">
+                                                        <span className="bucket-title">{label}</span>
+                                                        <div className="bucket-actions">
+                                                            <button
+                                                                className="bucket-action"
+                                                                onClick={() => startEdit(key)}
+                                                            >
+                                                                ✎ Edit
+                                                            </button>
+                                                            <button
+                                                                className="bucket-action"
+                                                                onClick={() => handleRegenerate(key)}
+                                                                disabled={regeneratingKey === key}
+                                                            >
+                                                                ↻
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    {editingKey === key ? (
+                                                        <textarea
+                                                            value={draftValue}
+                                                            onChange={(e) => setDraftValue(e.target.value)}
+                                                            onBlur={saveEdit}
+                                                            autoFocus
+                                                            rows={3}
+                                                        />
+                                                    ) : (
+                                                        <div className="bucket-body">
+                                                            {structured[key]}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ) : null
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {structured?.rawCapture && (
+                            <div className="overview-raw mt-lg">
+                                <button
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={() => setShowRawCapture((prev) => !prev)}
+                                >
+                                    {showRawCapture ? 'Hide raw capture' : 'Show raw capture'}
+                                </button>
+                                {showRawCapture && (
+                                    <div className="card mt-md">
+                                        <div className="bucket-body">{structured.rawCapture}</div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
-                    <TreeEditor
-                        rootNode={project.rootNode}
-                        onChange={handleTreeChange}
-                    />
-                </div>
+                ) : (
+                    <>
+                        {project.description && (
+                            <div className="card mb-lg">
+                                <h3 style={{ marginBottom: 'var(--space-sm)', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                                    Scenario Context
+                                </h3>
+                                <p style={{ margin: 0 }}>{project.description}</p>
+                            </div>
+                        )}
+
+                        <div className="card">
+                            <div className="flex items-center justify-between mb-md">
+                                <h2 style={{ margin: 0 }}>Decision Tree</h2>
+                                <span className="text-muted" style={{ fontSize: '0.85rem' }}>
+                                    Click Edit to modify nodes, + Child to add branches
+                                </span>
+                            </div>
+                            <TreeEditor
+                                rootNode={project.rootNode}
+                                onChange={handleTreeChange}
+                            />
+                        </div>
+                    </>
+                )}
 
                 {/* Call History */}
                 {project.callHistory && project.callHistory.length > 0 && (

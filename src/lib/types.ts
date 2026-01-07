@@ -19,6 +19,19 @@ export interface Project {
     createdAt: number;
     updatedAt: number;
     callHistory?: CallSummary[]; // Past call summaries
+    structured?: StructuredBuckets;
+}
+
+export interface StructuredBuckets {
+    goal: string;
+    stakeholder: string;
+    context: string;
+    decisionFrame: string;
+    redFlags?: string;
+    nonNegotiables?: string;
+    tone?: string;
+    title?: string;
+    rawCapture?: string;
 }
 
 // For navigation state in live mode

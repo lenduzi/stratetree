@@ -1,18 +1,17 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Project, TreeNode } from '@/lib/types';
+import { Project } from '@/lib/types';
 import { getAllProjects, deleteProject, exportAllData, importData, saveProject } from '@/lib/db';
-import { isServerApiKeyConfigured, transcribeAudioAction } from '@/lib/actions';
+import { isServerApiKeyConfigured, structureProjectAction, transcribeAudioAction } from '@/lib/actions';
 import { supabase } from '@/lib/supabase';
 import { getCloudProjects } from '@/lib/project-actions';
 import { v4 as uuidv4 } from 'uuid';
 import { ThemeToggle } from '@/components/ThemeProvider';
 import { User } from '@supabase/supabase-js';
 import { getBrowserApiKey } from '@/lib/settings';
-import { useRef } from 'react';
 
 export default function HomePage() {
   const router = useRouter();
@@ -249,7 +248,6 @@ export default function HomePage() {
           onClose={() => setShowNewModal(false)}
           onCreate={async (project) => {
             await saveProject(project);
-            router.push(`/project/${project.id}`);
           }}
         />
       )}
@@ -262,23 +260,23 @@ function NewProjectModal({
   onCreate
 }: {
   onClose: () => void;
-  onCreate: (project: Project) => void;
+  onCreate: (project: Project) => Promise<void>;
 }) {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
+  const router = useRouter();
+  const [captureText, setCaptureText] = useState('');
+  const [step, setStep] = useState<'capture' | 'structuring'>('capture');
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [useHold, setUseHold] = useState(false);
+  const [draftId, setDraftId] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
-  const toggleListening = async () => {
-    if (isListening) {
-      stopRecording();
-    } else {
-      await startRecording();
-    }
-  };
+  useEffect(() => {
+    setUseHold(window.matchMedia('(pointer: coarse)').matches);
+  }, []);
 
   const startRecording = async () => {
     try {
@@ -296,8 +294,7 @@ function NewProjectModal({
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
         const tracks = stream.getTracks();
-        tracks.forEach(track => track.stop()); // Release microphone
-
+        tracks.forEach(track => track.stop());
         await handleTranscription(audioBlob);
       };
 
@@ -321,127 +318,142 @@ function NewProjectModal({
     try {
       const formData = new FormData();
       formData.append('file', audioBlob, 'recording.webm');
-
-      // Get browser key if available
       const browserKey = getBrowserApiKey();
-
       const text = await transcribeAudioAction(formData, browserKey || undefined);
-
-      setDescription(prev => {
-        const needsSpace = prev.length > 0 && !prev.endsWith(' ');
-        return prev + (needsSpace ? ' ' : '') + text;
-      });
+      const nextText = `${captureText}${captureText && !captureText.endsWith(' ') ? ' ' : ''}${text}`;
+      setCaptureText(nextText);
+      await startStructuring(nextText);
     } catch (err) {
       console.error('Transcription failed:', err);
       alert('Failed to transcribe audio. Please check your API key.');
-    } finally {
       setIsProcessing(false);
     }
   };
 
-  const handleCreate = () => {
-    if (!name.trim()) return;
+  const toggleListening = async () => {
+    if (isListening) {
+      stopRecording();
+    } else {
+      await startRecording();
+    }
+  };
 
-    const project: Project = {
-      id: uuidv4(),
-      name: name.trim(),
-      description: description.trim(),
+  const startStructuring = async (raw: string) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return;
+    setStep('structuring');
+    setError(null);
+
+    const id = draftId || uuidv4();
+    setDraftId(id);
+
+    const draft: Project = {
+      id,
+      name: 'New Project',
+      description: '',
       rootNode: {
         id: uuidv4(),
         title: 'Start of call',
-        talkingPoints: ['Introduce yourself', 'Set the agenda'],
-        questions: ['What are your main priorities right now?', 'What prompted you to take this call?'],
+        talkingPoints: [],
+        questions: [],
         children: [],
+      },
+      structured: {
+        goal: '',
+        stakeholder: '',
+        context: '',
+        decisionFrame: '',
+        rawCapture: trimmed,
       },
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
 
-    onCreate(project);
+    await onCreate(draft);
+
+    try {
+      const browserKey = getBrowserApiKey();
+      const { buckets, tree } = await structureProjectAction(trimmed, browserKey || undefined);
+      const title = (buckets.title || `${buckets.stakeholder} — ${buckets.goal}`).trim() || 'New Project';
+      const updated: Project = {
+        ...draft,
+        name: title,
+        description: buckets.context || trimmed,
+        rootNode: tree,
+        structured: { ...buckets, rawCapture: trimmed, title },
+      };
+      await saveProject(updated);
+      router.push(`/project/${id}`);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to structure project');
+      setStep('capture');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2 className="modal-title">New Project</h2>
-
-        <div className="flex flex-col gap-md">
-          <div>
-            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>
-              Project Name
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g., Enterprise Sales Call"
-              autoFocus
-            />
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-sm">
-              <label style={{ display: 'block', fontWeight: 500 }}>
-                Context / Description
-              </label>
+      <div className="modal capture-modal" onClick={(e) => e.stopPropagation()}>
+        {step === 'capture' ? (
+          <>
+            <h2 className="modal-title">New Project</h2>
+            <div className="capture-body">
               <button
                 type="button"
-                onClick={toggleListening}
+                className={`capture-mic ${isListening ? 'is-listening' : ''}`}
+                onClick={!useHold ? toggleListening : undefined}
+                onPointerDown={useHold ? startRecording : undefined}
+                onPointerUp={useHold ? stopRecording : undefined}
+                onPointerLeave={useHold ? stopRecording : undefined}
                 disabled={isProcessing}
-                className={`btn btn-sm ${isListening ? 'btn-danger' : 'btn-secondary'}`}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  transition: 'all 0.2s ease',
-                  opacity: isProcessing ? 0.7 : 1
-                }}
-                title={isListening ? 'Stop recording' : 'Dictate description'}
               >
-                {isListening ? (
-                  <>
-                    <span className="pulsing-dot" style={{
-                      width: 8,
-                      height: 8,
-                      background: 'white',
-                      borderRadius: '50%',
-                      animation: 'pulse 1.5s infinite'
-                    }} />
-                    Stop
-                  </>
-                ) : isProcessing ? (
-                  <>
-                    <span className="spinner" style={{ width: 12, height: 12, border: '2px solid currentColor', borderRightColor: 'transparent' }} />
-                    Processing...
-                  </>
-                ) : (
-                  <>
-                    🎤 Dictate
-                  </>
-                )}
+                {isListening ? '◼' : '🎤'}
+              </button>
+              <div className="capture-label">Hold to talk</div>
+              <textarea
+                className="capture-textarea"
+                value={captureText}
+                onChange={(e) => setCaptureText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    startStructuring(captureText);
+                  }
+                }}
+                placeholder="Talk like you’re leaving a voice note. We’ll structure it."
+                rows={4}
+              />
+              {error && <div className="text-muted" style={{ color: 'var(--danger)' }}>{error}</div>}
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={onClose}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => startStructuring(captureText)}
+                disabled={!captureText.trim()}
+              >
+                Continue
               </button>
             </div>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Describe the call scenario. This helps AI generate better trees."
-              rows={3}
-            />
+          </>
+        ) : (
+          <div className="structuring-state">
+            <h2 className="modal-title">Structuring your call…</h2>
+            <div className="structuring-skeleton">
+              {['Goal', 'Who am I talking to?', 'What’s the situation?', 'If they say X → I say Y'].map((label) => (
+                <div key={label} className="skeleton-bucket">
+                  <div className="skeleton-label">{label}</div>
+                  <div className="skeleton-line" />
+                  <div className="skeleton-line short" />
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-
-        <div className="modal-actions">
-          <button className="btn btn-secondary" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            className="btn btn-primary"
-            onClick={handleCreate}
-            disabled={!name.trim()}
-          >
-            Create Project
-          </button>
-        </div>
+        )}
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { TreeNode } from '@/lib/types';
 import { handleObjectionAction } from '@/lib/actions';
 import { getBrowserApiKey } from '@/lib/settings';
@@ -25,6 +25,17 @@ export function PanicButton({ currentNode, projectContext, onNewNodes }: PanicBu
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    useEffect(() => {
+        if (!isOpen) return;
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                setIsOpen(false);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isOpen]);
+
     const handleSelect = async (objectionType: string) => {
         setIsLoading(true);
         setError(null);
@@ -48,42 +59,51 @@ export function PanicButton({ currentNode, projectContext, onNewNodes }: PanicBu
     return (
         <div style={{ position: 'relative' }}>
             {isOpen && (
-                <div className="panic-menu">
-                    {error && (
-                        <div style={{ color: 'var(--danger)', padding: 'var(--space-sm)', fontSize: '0.85rem' }}>
-                            {error}
-                        </div>
-                    )}
-                    {isLoading ? (
-                        <div className="flex items-center justify-center gap-sm" style={{ padding: 'var(--space-md)' }}>
-                            <div className="spinner" style={{ width: 20, height: 20 }} />
-                            <span>Generating response...</span>
-                        </div>
-                    ) : (
-                        <>
-                            <div style={{
-                                padding: 'var(--space-sm) var(--space-md)',
-                                fontSize: '0.75rem',
-                                color: 'var(--text-muted)',
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.05em'
-                            }}>
-                                What objection?
-                            </div>
-                            {OBJECTION_TYPES.map((type) => (
-                                <button
-                                    key={type.id}
-                                    className="panic-option"
-                                    onClick={() => handleSelect(type.id)}
-                                >
-                                    <div style={{ fontWeight: 500 }}>{type.label}</div>
-                                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                                        {type.description}
+                <div className="panic-backdrop" onClick={() => setIsOpen(false)}>
+                    <div
+                        className="panic-modal"
+                        onClick={(e) => e.stopPropagation()}
+                        role="dialog"
+                        aria-modal="true"
+                    >
+                        <div className="panic-menu">
+                            {error && (
+                                <div style={{ color: 'var(--danger)', padding: 'var(--space-sm)', fontSize: '0.85rem' }}>
+                                    {error}
+                                </div>
+                            )}
+                            {isLoading ? (
+                                <div className="flex items-center justify-center gap-sm" style={{ padding: 'var(--space-md)' }}>
+                                    <div className="spinner" style={{ width: 20, height: 20 }} />
+                                    <span>Generating response...</span>
+                                </div>
+                            ) : (
+                                <>
+                                    <div style={{
+                                        padding: 'var(--space-sm) var(--space-md)',
+                                        fontSize: '0.75rem',
+                                        color: 'var(--text-muted)',
+                                        textTransform: 'uppercase',
+                                        letterSpacing: '0.05em'
+                                    }}>
+                                        What objection?
                                     </div>
-                                </button>
-                            ))}
-                        </>
-                    )}
+                                    {OBJECTION_TYPES.map((type) => (
+                                        <button
+                                            key={type.id}
+                                            className="panic-option"
+                                            onClick={() => handleSelect(type.id)}
+                                        >
+                                            <div style={{ fontWeight: 500 }}>{type.label}</div>
+                                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                                {type.description}
+                                            </div>
+                                        </button>
+                                    ))}
+                                </>
+                            )}
+                        </div>
+                    </div>
                 </div>
             )}
 

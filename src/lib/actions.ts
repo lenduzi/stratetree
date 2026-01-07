@@ -1,7 +1,7 @@
 'use server';
 
 import OpenAI from 'openai';
-import { TreeNode, CallSummary } from './types';
+import { TreeNode, CallSummary, StructuredBuckets } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
 // Helper: Add unique IDs and sentiments to all nodes in a tree
@@ -72,6 +72,146 @@ IMPORTANT RULES:
 
     const parsed = JSON.parse(content);
     return addIdsToTree(parsed);
+}
+
+async function extractStructuredBuckets(capture: string, userApiKey?: string): Promise<StructuredBuckets> {
+    const client = getOpenAIClient(userApiKey);
+
+    const systemPrompt = `Extract structured fields from the raw capture.
+Return a JSON object with:
+- goal: string
+- stakeholder: string
+- context: string
+- decisionFrame: string (If they say X → I say Y)
+Optional keys when clearly present:
+- redFlags
+- nonNegotiables
+- tone
+- title
+
+Keep each field concise and clear.`;
+
+    const response = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: capture }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.4,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) throw new Error('No response from AI');
+
+    const parsed = JSON.parse(content) as StructuredBuckets;
+    return {
+        goal: parsed.goal || '',
+        stakeholder: parsed.stakeholder || '',
+        context: parsed.context || '',
+        decisionFrame: parsed.decisionFrame || '',
+        redFlags: parsed.redFlags,
+        nonNegotiables: parsed.nonNegotiables,
+        tone: parsed.tone,
+        title: parsed.title,
+    };
+}
+
+async function generateTreeFromBuckets(
+    buckets: StructuredBuckets,
+    userApiKey?: string
+): Promise<TreeNode> {
+    const client = getOpenAIClient(userApiKey);
+
+    const systemPrompt = `You are an expert sales strategist. Generate a decision tree for a call using the structured fields.
+
+Output a JSON object with this structure:
+{
+  "title": "Root greeting/opening",
+  "talkingPoints": ["Point 1 to say", "Point 2 to say"],
+  "questions": ["Discovery question 1?", "Discovery question 2?"],
+  "children": [
+    {
+      "title": "Possible response scenario",
+      "talkingPoints": ["What to say in this case"],
+      "questions": ["Follow-up discovery question?"],
+      "sentiment": "positive",
+      "children": [...]
+    }
+  ]
+}
+
+IMPORTANT:
+- Each node MUST include 1-3 discovery questions.
+- Use sentiments: "positive", "neutral", or "negative".
+- Keep titles short (2-5 words).
+- Use Goal/Stakeholder/Context/Decision frame to shape branches.`;
+
+    const response = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: systemPrompt },
+            {
+                role: 'user',
+                content: `Goal: ${buckets.goal}\nStakeholder: ${buckets.stakeholder}\nContext: ${buckets.context}\nDecision frame: ${buckets.decisionFrame}`
+            }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.7,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) throw new Error('No response from AI');
+
+    const parsed = JSON.parse(content);
+    return addIdsToTree(parsed);
+}
+
+export async function structureProjectAction(
+    capture: string,
+    userApiKey?: string
+): Promise<{ buckets: StructuredBuckets; tree: TreeNode }> {
+    const buckets = await extractStructuredBuckets(capture, userApiKey);
+    const tree = await generateTreeFromBuckets(buckets, userApiKey);
+    return { buckets, tree };
+}
+
+export async function regenerateBucketAction(
+    bucketKey: keyof StructuredBuckets,
+    capture: string,
+    buckets: StructuredBuckets,
+    userApiKey?: string
+): Promise<{ value: string; tree?: TreeNode }> {
+    const client = getOpenAIClient(userApiKey);
+    const systemPrompt = `Regenerate only the requested bucket based on the raw capture and current structured fields.
+Return JSON: { "value": "..." }`;
+
+    const response = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: systemPrompt },
+            {
+                role: 'user',
+                content: `Bucket: ${bucketKey}\nRaw capture: ${capture}\nCurrent fields: ${JSON.stringify(buckets)}`
+            }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.6,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) throw new Error('No response from AI');
+
+    const parsed = JSON.parse(content) as { value: string };
+    const value = parsed.value || '';
+
+    if (bucketKey === 'decisionFrame') {
+        const nextBuckets = { ...buckets, decisionFrame: value };
+        const tree = await generateTreeFromBuckets(nextBuckets, userApiKey);
+        return { value, tree };
+    }
+
+    return { value };
 }
 
 // Refine a specific node with AI assistance
