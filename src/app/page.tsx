@@ -5,13 +5,16 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { CaptureFlow } from '@/components/CaptureFlow';
+import { ThemeToggle } from '@/components/ThemeProvider';
+import { DemoSection } from '@/components/landing/DemoSection';
 
 const ROTATING_WORDS = [
-  'call',
   'salary negotiation',
   'tough conversation',
+  'job interview',
   'partnership pitch',
-  'customer escalation',
+  'performance review',
+  'first date',
 ];
 
 export default function LandingPage() {
@@ -29,50 +32,56 @@ export default function LandingPage() {
 
   return (
     <div className="landing">
+      <header className="landing-header">
+        <div className="landing-brand">
+          <Image
+            src="/brand/hugging-brain.png"
+            alt="YapMap mascot"
+            width={40}
+            height={40}
+          />
+          <span>YapMap</span>
+        </div>
+        <div className="landing-header-actions">
+          <ThemeToggle />
+          <Link href="/login" className="btn btn-secondary btn-sm landing-login">
+            Log in
+          </Link>
+        </div>
+      </header>
+
       <main className="landing-main">
         <div className="landing-hero">
-          <div className="landing-brand">
-            <Image
-              src="/brand/hugging-brain.png"
-              alt="YapMap mascot"
-              width={56}
-              height={56}
-            />
-            <span>YapMap</span>
-          </div>
           <h1 className="landing-headline">
-            Plan your next{' '}
-            <span key={rotatingWord} className="rotating-word">
-              {rotatingWord}
+            <span className="headline-static">Master your next</span>
+            <span className="rotating-slot">
+              <span key={rotatingWord} className="rotating-word">
+                {rotatingWord}
+              </span>
             </span>
           </h1>
           <p className="landing-subtext">
-            Capture the situation, let AI structure it, then go live.
+            Structure your convo, reach your goal
           </p>
         </div>
 
         <div className="landing-capture">
           <CaptureFlow
             primaryLabel="Create my YapMap"
-            microcopy="No signup needed • Free to try • Yappi helps you stay calm"
+            microcopy="Free to try • No signup • Yappi coaches you live"
             showCancel={false}
             isGuest
             onComplete={(projectId) => router.push(`/app/project/${projectId}`)}
           />
         </div>
 
-        <div className="landing-links">
-          <Link href="/app" className="text-muted">
-            Open full app
-          </Link>
+        <div className="landing-empty">
+          <h2>Prepare your first call</h2>
+          <p>Use the box above to turn your situation into a live coaching plan.</p>
         </div>
       </main>
 
-      <section className="landing-demo">
-        <div className="demo-placeholder">
-          Demo coming soon. (TODO: add /public/demo.mp4)
-        </div>
-      </section>
+      <DemoSection />
     </div>
   );
 }
