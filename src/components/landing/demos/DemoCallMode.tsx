@@ -3,7 +3,7 @@ export function DemoCallMode() {
         <div className="demo-call">
             <div className="demo-call-header">
                 <button className="btn btn-panic btn-sm">Panic</button>
-                <button className="btn btn-secondary btn-sm">Finish Call</button>
+                <button className="btn btn-secondary btn-sm">Finish Conversation</button>
             </div>
             <div className="demo-call-section">
                 <div className="demo-call-label">Say this now</div>
@@ -21,7 +21,7 @@ export function DemoCallMode() {
                 </div>
             </div>
             <div className="demo-call-section">
-                <div className="demo-call-label">Next moves</div>
+                <div className="demo-call-label">Their response</div>
                 <div className="demo-call-moves">
                     <button className="demo-move-btn">Positive</button>
                     <button className="demo-move-btn">Neutral</button>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Project, TreeNode, CallSummary, NodeSentiment, ScenarioCategory } from '@/lib/types';
+import { Project, TreeNode, CallSummary, NodeSentiment } from '@/lib/types';
 import { PanicButton } from './PanicButton';
 import { findNodeById, getPathToNode, addChildToNode, updateNodeInTree } from '@/lib/hooks';
 import { saveProject } from '@/lib/db';
@@ -11,6 +11,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getSentimentClass, getSentimentEmoji } from './NodeCard';
 import { getBrowserApiKey } from '@/lib/settings';
 import { getClientId } from '@/lib/client-id';
+import { supabase } from '@/lib/supabase';
 
 interface FocusedViewProps {
     project: Project;
@@ -27,6 +28,7 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
     const [lastMoveLabel, setLastMoveLabel] = useState<string | null>(null);
     const [lastSelectedSentiment, setLastSelectedSentiment] = useState<TreeNode['sentiment'] | null>(null);
     const [showSaveNudge, setShowSaveNudge] = useState(false);
+    const [isAuthed, setIsAuthed] = useState<boolean | null>(null);
     const [isGeneratingNextMoves, setIsGeneratingNextMoves] = useState(false);
     const [showPanicHelp, setShowPanicHelp] = useState(false);
     const [askNextGenerating, setAskNextGenerating] = useState(false);
@@ -34,16 +36,16 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
     const [idleNudge, setIdleNudge] = useState(false);
     const lastGeneratedAtRef = useRef<Record<string, number>>({});
     const lastMovesGeneratedAtRef = useRef<Record<string, number>>({});
+    const objectionHintsRef = useRef<Record<string, string>>({});
     const [negativePulse, setNegativePulse] = useState(false);
-    const [objectionStep, setObjectionStep] = useState<{ title: string; sayThisNow: string[]; askNext: string[] } | null>(null);
     const [objectionLoading, setObjectionLoading] = useState(false);
     const [objectionError, setObjectionError] = useState<string | null>(null);
 
     const currentNode = findNodeById(project.rootNode, currentNodeId) || project.rootNode;
     const childList = Array.isArray(currentNode.children) ? currentNode.children : [];
     const path = getPathToNode(project.rootNode, currentNodeId) || [project.rootNode];
-    const talkingLines = objectionStep?.sayThisNow.length ? objectionStep.sayThisNow : currentNode.talkingPoints;
-    const questionLines = objectionStep?.askNext.length ? objectionStep.askNext : (currentNode.questions || []);
+    const talkingLines = Array.isArray(currentNode.talkingPoints) ? currentNode.talkingPoints : [];
+    const questionLines = Array.isArray(currentNode.questions) ? currentNode.questions : [];
     const isLowAskNext = questionLines.length < 2;
     const sentimentNudge = lastSelectedSentiment === 'neutral' || lastSelectedSentiment === 'negative';
     const nudgeActive = idleNudge || isLowAskNext || sentimentNudge;
@@ -53,6 +55,18 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
         negative: childList.find((child) => child.sentiment === 'negative') || null,
     };
     const nextMovesNeeded = !sentimentChildren.positive || !sentimentChildren.neutral || !sentimentChildren.negative;
+
+    useEffect(() => {
+        const checkAuth = async () => {
+            if (!supabase?.auth) {
+                setIsAuthed(false);
+                return;
+            }
+            const { data: { user } } = await supabase.auth.getUser();
+            setIsAuthed(!!user);
+        };
+        checkAuth();
+    }, []);
 
     useEffect(() => {
         setIdleNudge(false);
@@ -105,7 +119,6 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
     }, [currentNode, path, showFullTree, showFinishModal]);
 
     const navigateToNode = (nodeId: string) => {
-        setObjectionStep(null);
         const node = findNodeById(project.rootNode, nodeId);
         if (node?.title) {
             setLastMoveLabel(node.title);
@@ -130,11 +143,13 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
         lastMovesGeneratedAtRef.current[currentNodeId] = now;
         setIsGeneratingNextMoves(true);
         try {
+            const objectionHint = objectionHintsRef.current[currentNodeId];
             const baseArgs = [
                 currentNode,
                 project.structured?.goal || project.description,
                 project.structured?.router,
                 lastMoveLabel || undefined,
+                objectionHint || undefined,
                 getBrowserApiKey() || undefined,
                 getClientId(),
             ] as const;
@@ -243,7 +258,6 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
     }, [pendingSentiment, sentimentChildren, navigateToNode]);
 
     const handleSelectResponse = (sentiment: NodeSentiment) => {
-        setObjectionStep(null);
         const child = sentimentChildren[sentiment];
         if (child) {
             navigateToNode(child.id);
@@ -253,7 +267,17 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
         }
     };
 
-    const objectionLabels = getObjectionLabels(project.structured?.router?.scenario_category);
+    const fallbackObjections = [
+        'Denial / disagreement on facts',
+        'Defensive / blame shifting',
+        'Emotional overwhelm',
+        'Avoidance / delay',
+        'Trust / credibility',
+        'Different priorities',
+    ];
+    const rawObjections = project.structured?.objections || [];
+    const objectionsFallback = project.structured?.objectionsFallback || rawObjections.length === 0;
+    const objectionLabels = rawObjections.length > 0 ? rawObjections : fallbackObjections;
 
     const handlePanicSelect = async (label: string) => {
         const isOther = label === 'Other...';
@@ -277,11 +301,29 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                 getClientId()
             );
             console.log('[panic] objection_ms', Date.now() - t0);
-            setObjectionStep({
+            const existingNegative = sentimentChildren.negative;
+            const targetId = existingNegative?.id || uuidv4();
+            const updatedNegative: TreeNode = {
+                id: targetId,
                 title: step.title,
-                sayThisNow: step.sayThisNow || [],
-                askNext: step.askNext || [],
-            });
+                talkingPoints: step.sayThisNow || [],
+                questions: step.askNext || [],
+                sentiment: 'negative',
+                children: existingNegative?.children || [],
+            };
+            let updatedRoot = project.rootNode;
+            if (existingNegative) {
+                updatedRoot = updateNodeInTree(updatedRoot, existingNegative.id, () => updatedNegative);
+            } else {
+                updatedRoot = addChildToNode(updatedRoot, currentNodeId, updatedNegative);
+            }
+            objectionHintsRef.current[targetId] = selectedLabel;
+            const updatedProject = { ...project, rootNode: updatedRoot };
+            await saveProject(updatedProject);
+            onProjectUpdate?.(updatedProject);
+            setNegativePulse(true);
+            window.setTimeout(() => setNegativePulse(false), 800);
+            navigateToNode(targetId);
         } catch (e) {
             console.warn('Failed to generate objection step', e);
             setObjectionError('Couldn’t generate objection help — try again');
@@ -353,7 +395,7 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
             <header className="header call-topbar">
                 <div className="call-topbar-title">
                     <span className="call-title-primary">
-                        {project.name?.split('—')[0]?.trim() || project.name || 'Call'}
+                        {project.name?.split('—')[0]?.trim() || project.name || 'Conversation'}
                     </span>
                     <span className="call-title-secondary">{currentNode.title}</span>
                 </div>
@@ -367,6 +409,7 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                         <PanicButton
                             nudgeActive={nudgeActive}
                             objections={objectionLabels}
+                            fallbackObjections={objectionsFallback}
                             onSelect={handlePanicSelect}
                         />
                         <button
@@ -381,7 +424,7 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                         className="btn btn-primary btn-sm call-cta-finish"
                         onClick={() => setShowFinishModal(true)}
                     >
-                        ✓ Finish Call
+                        ✓ Finish Conversation
                     </button>
                 </div>
             </header>
@@ -405,13 +448,13 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                                 className="finish-link"
                                 onClick={() => setShowFinishModal(true)}
                             >
-                                Finish Call
+                                Finish Conversation
                             </button>
                         </div>
                     </div>
                     <h1 className="current-node-title">
                         {currentNode.sentiment && <span style={{ marginRight: 8 }}>{getSentimentEmoji(currentNode.sentiment)}</span>}
-                        {objectionStep?.title || currentNode.title}
+                        {currentNode.title}
                     </h1>
                     {talkingLines.length > 0 && (
                         <div className={`say-now-brief ${showMore ? 'expanded' : ''}`}>
@@ -502,7 +545,7 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                 </div>
             )}
 
-            {/* Finish Call Modal */}
+            {/* Finish Conversation Modal */}
             {showFinishModal && (
                 <FinishCallModal
                     projectId={project.id}
@@ -518,6 +561,16 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                         await saveProject(updatedProject);
                         onProjectUpdate?.(updatedProject);
                         setShowFinishModal(false);
+                        if (isAuthed) {
+                            router.push('/app');
+                            return;
+                        }
+                        if (typeof window !== 'undefined') {
+                            localStorage.setItem('yapmap-pending-summary', JSON.stringify({
+                                projectId: project.id,
+                                summaryId: summary.id,
+                            }));
+                        }
                         setShowSaveNudge(true);
                     }}
                 />
@@ -526,15 +579,15 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
             {showSaveNudge && (
                 <div className="modal-overlay" onClick={() => {
                     setShowSaveNudge(false);
-                    router.push(`/app/project/${project.id}`);
+                    router.push('/app');
                 }}>
                     <div className="modal" onClick={(e) => e.stopPropagation()}>
                         <h2 className="modal-title">Save this YapMap?</h2>
-                        <p className="text-muted">Save outcome + notes • Reuse later • Create more</p>
+                        <p className="text-muted">Signing up is free. Save outcome + notes • Reuse later • Create more</p>
                         <div className="modal-actions">
                             <button className="btn btn-secondary" onClick={() => {
                                 setShowSaveNudge(false);
-                                router.push(`/app/project/${project.id}`);
+                                router.push('/app');
                             }}>
                                 Not now
                             </button>
@@ -560,78 +613,6 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
             )}
         </div>
     );
-}
-
-function getObjectionLabels(category?: ScenarioCategory) {
-    switch (category) {
-        case 'sales_partnership':
-            return [
-                'Budget',
-                'Timing / not a priority',
-                'Need approval',
-                'Already using competitor',
-                "Don't see value / unclear ROI",
-                'Too much effort to implement',
-                'Trust / credibility',
-                'Send info (stall)',
-                'Other...',
-            ];
-        case 'salary_negotiation':
-            return [
-                'Budget / comp freeze',
-                'Not the right time',
-                'Performance expectations not met',
-                'Need more scope/impact',
-                'Internal equity / bands',
-                "Let's revisit later",
-                'Non-monetary benefits instead',
-                'Headcount / org constraints',
-                'Other...',
-            ];
-        case 'customer_escalation':
-            return [
-                'Unhappy / unacceptable',
-                'Threatening to churn',
-                'Price too high for value',
-                'Trust broken / past issues',
-                'Need immediate fix',
-                'Want refund/credit',
-                'Need executive attention',
-                'Other...',
-            ];
-        case 'personal_boundary':
-            return [
-                'Didn’t realize it was loud',
-                'Defensive (I have rights)',
-                'Minimizes the issue',
-                'Emotional / stressed',
-                'Practical constraints',
-                'Counter-complaint',
-                'I’ll try (non-committal)',
-                'Other...',
-            ];
-        case 'relationship_conversation':
-            return [
-                'Feeling attacked/defensive',
-                'Avoiding / shutting down',
-                'You’re overreacting',
-                'Misunderstanding / different needs',
-                'Emotional overwhelm',
-                'Trust issue / past hurt',
-                'Practical constraints',
-                'Other...',
-            ];
-        default:
-            return [
-                'Denial / disagreement on facts',
-                'Defensive / blame shifting',
-                'Emotional overwhelm',
-                'Avoidance / delay',
-                'Trust / credibility',
-                'Different priorities',
-                'Other...',
-            ];
-    }
 }
 
 // Finish Call Modal Component
@@ -693,7 +674,7 @@ function FinishCallModal({
     return (
         <div className="modal-overlay" onClick={onClose}>
             <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 600 }}>
-                <h2 className="modal-title">📞 Call Summary</h2>
+                <h2 className="modal-title">💬 Conversation Summary</h2>
 
                 {/* Path taken */}
                 <div style={{ marginBottom: 'var(--space-lg)' }}>
@@ -749,7 +730,7 @@ function FinishCallModal({
                 {/* Outcome */}
                 <div style={{ marginBottom: 'var(--space-lg)' }}>
                     <label style={{ display: 'block', marginBottom: 8, fontWeight: 500, fontSize: '0.9rem' }}>
-                        Call Outcome
+                        Conversation Outcome
                     </label>
                     <div className="flex gap-sm" style={{ flexWrap: 'wrap' }}>
                         {[

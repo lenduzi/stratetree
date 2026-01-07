@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { Project } from '@/lib/types';
 import { saveProject } from '@/lib/db';
-import { extractStructuredBucketsAction, generateObjectionHandlersAction, generateProjectBundleAction, generateTreeFromBucketsAction, routeScenarioAction, transcribeAudioAction } from '@/lib/actions';
+import { extractStructuredBucketsAction, generateObjectionHandlersAction, generateProjectBundleAction, generateScenarioObjectionsAction, generateTreeFromBucketsAction, routeScenarioAction, transcribeAudioAction } from '@/lib/actions';
 import { getBrowserApiKey } from '@/lib/settings';
 import { getClientId } from '@/lib/client-id';
 import Link from 'next/link';
@@ -209,7 +209,7 @@ export function CaptureFlow({
       description: '',
       rootNode: {
         id: uuidv4(),
-        title: 'Start of call',
+        title: 'Start of conversation',
         talkingPoints: [],
         questions: [],
         children: [],
@@ -250,13 +250,24 @@ export function CaptureFlow({
       const tree = bundles?.tree || await generateTreeFromBucketsAction(buckets, router, browserKey || undefined, clientId);
       await advanceStage();
       const objectionHandlers = bundles?.objectionHandlers || await generateObjectionHandlersAction(router, buckets, browserKey || undefined, clientId);
+      const objectionsPayload = bundles?.buckets?.objections
+        ? { objections: bundles.buckets.objections, objectionsFallback: bundles.buckets.objectionsFallback || false }
+        : await generateScenarioObjectionsAction(router, buckets, browserKey || undefined, clientId);
       const title = (buckets.title || `${buckets.stakeholder} — ${buckets.goal}`).trim() || 'New Project';
       const updated: Project = {
         ...draft,
         name: title,
         description: buckets.context || trimmed,
         rootNode: tree,
-        structured: { ...buckets, rawCapture: trimmed, title, router, objectionHandlers },
+        structured: {
+          ...buckets,
+          rawCapture: trimmed,
+          title,
+          router,
+          objectionHandlers,
+          objections: objectionsPayload.objections,
+          objectionsFallback: objectionsPayload.objectionsFallback,
+        },
       };
       const dbEndStart = Date.now();
       await saveProject(updated);
@@ -338,7 +349,7 @@ export function CaptureFlow({
         </>
       ) : (
         <div className="structuring-state">
-          <h2 className="modal-title">Structuring your call…</h2>
+          <h2 className="modal-title">Structuring your conversation…</h2>
           <div className="structuring-status">{stageLabel}</div>
           <div className="structuring-progress">
             <div className="structuring-progress-bar" style={{ width: `${progress}%` }} />

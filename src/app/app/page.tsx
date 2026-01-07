@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Project } from '@/lib/types';
-import { getAllProjects, deleteProject, exportAllData, importData, saveProject } from '@/lib/db';
+import { getAllProjects, deleteProject, exportAllData, importData, saveProject, getProject } from '@/lib/db';
 import { isServerApiKeyConfigured } from '@/lib/actions';
 import { supabase } from '@/lib/supabase';
 import { getCloudProjects } from '@/lib/project-actions';
@@ -50,6 +50,24 @@ export default function HomePage() {
     setUser(user);
     if (user) {
       syncCloudToLocal();
+      syncPendingSummary();
+    }
+  };
+
+  const syncPendingSummary = async () => {
+    if (typeof window === 'undefined') return;
+    const raw = localStorage.getItem('yapmap-pending-summary');
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as { projectId?: string };
+      if (!parsed.projectId) return;
+      const project = await getProject(parsed.projectId);
+      if (project) {
+        await saveProject(project, true);
+      }
+      localStorage.removeItem('yapmap-pending-summary');
+    } catch (e) {
+      console.warn('Failed to sync pending summary', e);
     }
   };
 
@@ -150,7 +168,7 @@ export default function HomePage() {
         <div className="flex items-center justify-between mb-lg project-hero">
           <div>
             <h1>Your Strategy Trees</h1>
-            <p className="text-muted">Prepare for calls with decision trees</p>
+            <p className="text-muted">Prepare for conversations with decision trees</p>
           </div>
           <button
             className="btn btn-primary btn-lg project-cta project-cta-desktop"
@@ -191,7 +209,7 @@ export default function HomePage() {
         ) : projects.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">🌱</div>
-            <div className="empty-state-title">Prepare your first call</div>
+            <div className="empty-state-title">Prepare your first conversation</div>
             <p>Tap “New Project” to dictate a scenario and generate your tree.</p>
             <button
               className="btn btn-primary mt-lg project-cta"
@@ -217,7 +235,7 @@ export default function HomePage() {
                   </span>
                   {project.callHistory && project.callHistory.length > 0 && (
                     <span style={{ color: 'var(--accent-secondary)' }}>
-                      📞 {project.callHistory.length} call{project.callHistory.length !== 1 ? 's' : ''}
+                      💬 {project.callHistory.length} conversation{project.callHistory.length !== 1 ? 's' : ''}
                     </span>
                   )}
                   <button
@@ -243,12 +261,14 @@ export default function HomePage() {
         )}
       </main>
 
-      <button
-        className="btn btn-primary btn-lg project-cta project-cta-sticky"
-        onClick={() => setShowNewModal(true)}
-      >
-        + New Project
-      </button>
+      <div className="project-cta-sticky">
+        <button
+          className="btn btn-primary btn-lg project-cta"
+          onClick={() => setShowNewModal(true)}
+        >
+          + New Project
+        </button>
+      </div>
 
       {showNewModal && (
         <NewProjectModal

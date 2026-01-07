@@ -138,6 +138,8 @@ html {
   font-size: 16px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  max-width: 100vw;
+  overflow-x: hidden;
 }
 
 body {
@@ -147,6 +149,9 @@ body {
   line-height: 1.6;
   min-height: 100vh;
   transition: background-color var(--transition-normal), color var(--transition-normal);
+  max-width: 100vw;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
 }
 
 /* Typography */
@@ -568,6 +573,10 @@ textarea {
     radial-gradient(1200px 600px at 20% -10%, rgba(99, 102, 241, 0.16), transparent 60%),
     radial-gradient(900px 500px at 85% 0%, rgba(14, 165, 233, 0.12), transparent 55%),
     var(--bg-primary);
+  max-width: 100vw;
+  overflow-x: hidden;
+  overscroll-behavior: none;
+  touch-action: pan-y;
 }
 
 .focused-view.call-mode .header {
@@ -654,6 +663,8 @@ textarea {
 
 .focused-view.call-mode .focused-content {
   padding-bottom: calc(var(--space-xl) + var(--call-tray-height));
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .current-node {
@@ -733,6 +744,8 @@ textarea {
 
 .focused-view.call-mode .current-node-title {
   letter-spacing: 0.01em;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .focused-view.call-mode .say-now-brief {
@@ -747,6 +760,8 @@ textarea {
   padding: var(--space-sm) var(--space-md);
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--bg-tertiary) 75%, transparent);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .focused-view.call-mode .objection-loading {
@@ -792,6 +807,8 @@ textarea {
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--bg-secondary) 70%, transparent);
   color: var(--text-primary);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 
@@ -1983,21 +2000,24 @@ textarea {
 
   .project-cta-sticky {
     position: fixed;
-    left: 50%;
-    transform: translateX(-50%);
-    bottom: calc(12px + env(safe-area-inset-bottom));
+    left: 0;
+    right: 0;
+    bottom: 0;
     z-index: 90;
-    box-shadow: var(--shadow-lg);
-    max-width: 520px;
-    width: min(520px, calc(100% - clamp(32px, 8vw, 48px)));
-    padding-left: clamp(16px, 4vw, 24px);
-    padding-right: clamp(16px, 4vw, 24px);
+    padding: 0 clamp(16px, 4vw, 24px) calc(16px + env(safe-area-inset-bottom));
     box-sizing: border-box;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
   }
 
-  .project-cta-sticky.project-cta {
+  .project-cta-sticky .project-cta {
     width: 100%;
+    max-width: 520px;
+    box-shadow: var(--shadow-lg);
+    pointer-events: auto;
   }
+
 
   .container {
     padding-bottom: calc(var(--space-2xl) + 120px + env(safe-area-inset-bottom));

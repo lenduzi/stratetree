@@ -3,12 +3,12 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
 
 export const metadata: Metadata = {
-  title: "YapMap - Call Prep Maps",
-  description: "Prepare for calls with AI-powered decision maps",
+  title: "YapMap - Conversation Prep Maps",
+  description: "Prepare for conversations with AI-powered decision maps",
   applicationName: "YapMap",
   openGraph: {
     title: "YapMap",
-    description: "Prepare for calls with AI-powered decision maps",
+    description: "Prepare for conversations with AI-powered decision maps",
     images: ["/og.png"],
     type: "website",
   },

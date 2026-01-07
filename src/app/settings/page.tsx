@@ -9,6 +9,7 @@ import { exportAllData, importData } from '@/lib/db';
 export default function SettingsPage() {
     const [isServerConfigured, setIsServerConfigured] = useState<boolean | null>(null);
     const [browserKey, setBrowserKey] = useState('');
+    const [savedKey, setSavedKey] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [showKey, setShowKey] = useState(false);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -16,8 +17,17 @@ export default function SettingsPage() {
     useEffect(() => {
         checkConfig();
         const savedKey = getBrowserApiKey();
-        if (savedKey) setBrowserKey(savedKey);
+        if (savedKey) {
+            setBrowserKey(savedKey);
+            setSavedKey(savedKey);
+        }
     }, []);
+
+    useEffect(() => {
+        if (browserKey !== savedKey && showKey) {
+            setShowKey(false);
+        }
+    }, [browserKey, savedKey, showKey]);
 
     const checkConfig = async () => {
         const configured = await isServerApiKeyConfigured();
@@ -29,6 +39,7 @@ export default function SettingsPage() {
         setBrowserApiKey(browserKey);
         setTimeout(() => {
             setIsSaving(false);
+            setSavedKey(browserKey);
             alert('API Key saved locally in your browser.');
         }, 500);
     };
@@ -37,6 +48,8 @@ export default function SettingsPage() {
         if (confirm('Clear the locally saved API Key?')) {
             clearBrowserApiKey();
             setBrowserKey('');
+            setSavedKey('');
+            setShowKey(false);
         }
     };
 
@@ -65,6 +78,7 @@ export default function SettingsPage() {
     };
 
     const hasAnyKey = isServerConfigured || !!browserKey;
+    const canRevealKey = !!savedKey && browserKey === savedKey;
 
     return (
         <div className="focused-view">
@@ -79,7 +93,7 @@ export default function SettingsPage() {
                 <h1 className="mb-lg">Settings</h1>
 
                 <div className="card">
-                    <h2 style={{ marginBottom: 'var(--space-md)' }}>OpenAI Configuration</h2>
+                    <h2 style={{ marginBottom: 'var(--space-md)' }}>AI Provider Configuration</h2>
 
                     {/* Status Indicator */}
                     <div className="flex items-center gap-md mb-lg p-md" style={{
@@ -107,7 +121,7 @@ export default function SettingsPage() {
                     {/* API Key Input */}
                     <div className="flex flex-col gap-sm">
                         <label style={{ fontWeight: 500, fontSize: '0.9rem' }}>
-                            Your OpenAI API Key (Browser Override)
+                            Bring your own key (optional)
                         </label>
                         <div className="flex gap-sm">
                             <input
@@ -119,14 +133,18 @@ export default function SettingsPage() {
                             />
                             <button
                                 className="btn btn-secondary"
-                                onClick={() => setShowKey(!showKey)}
+                                onClick={() => {
+                                    if (!canRevealKey) return;
+                                    setShowKey(!showKey);
+                                }}
                                 title={showKey ? 'Hide' : 'Show'}
+                                disabled={!canRevealKey}
                             >
                                 {showKey ? '👁️‍🗨️' : '👁️'}
                             </button>
                         </div>
                         <p className="text-muted" style={{ fontSize: '0.8rem' }}>
-                            This key is stored only in your browser's local storage and is never saved on our servers.
+                            Stored only in your browser (local storage). Never sent to our servers except for API requests you initiate. OpenAI is supported today, with more providers coming.
                         </p>
 
                         <div className="flex gap-sm mt-sm">
@@ -165,7 +183,7 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="card mt-lg">
-                    <h2 style={{ marginBottom: 'var(--space-md)' }}>Keyboard Shortcuts (Live Mode)</h2>
+                    <h2 style={{ marginBottom: 'var(--space-md)' }}>Keyboard Shortcuts (Conversation Mode)</h2>
                     <div className="flex flex-col gap-sm" style={{ fontSize: '0.9rem' }}>
                         <div><span className="kbd">1</span>-<span className="kbd">9</span> Select option by number</div>
                         <div><span className="kbd">↑</span><span className="kbd">↓</span> Navigate options</div>

@@ -37,7 +37,7 @@ export function DemoStructuring() {
 
     return (
         <div className="structuring-state demo-structuring">
-            <h2 className="modal-title">Structuring your call…</h2>
+            <h2 className="modal-title">Structuring your conversation…</h2>
             <div className="structuring-status">{stageLabel}</div>
             <div className="structuring-progress">
                 <div className="structuring-progress-bar" style={{ width: `${progress}%` }} />

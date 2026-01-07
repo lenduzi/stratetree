@@ -5,11 +5,13 @@ import { useEffect, useState } from 'react';
 interface PanicButtonProps {
     nudgeActive?: boolean;
     objections: string[];
+    fallbackObjections?: boolean;
     onSelect: (label: string) => void;
 }
 
-export function PanicButton({ nudgeActive, objections, onSelect }: PanicButtonProps) {
+export function PanicButton({ nudgeActive, objections, fallbackObjections, onSelect }: PanicButtonProps) {
     const [isOpen, setIsOpen] = useState(false);
+    const labels = Array.from(new Set([...objections, 'Other...']));
 
     useEffect(() => {
         if (!isOpen) return;
@@ -42,7 +44,20 @@ export function PanicButton({ nudgeActive, objections, onSelect }: PanicButtonPr
                             }}>
                                 Why are they resisting?
                             </div>
-                            {objections.map((label) => (
+                            {fallbackObjections && (
+                                <div
+                                    style={{
+                                        padding: 'var(--space-xs) var(--space-md)',
+                                        fontSize: '0.75rem',
+                                        color: 'var(--text-muted)',
+                                        textTransform: 'uppercase',
+                                        letterSpacing: '0.05em'
+                                    }}
+                                >
+                                    General reasons
+                                </div>
+                            )}
+                            {labels.map((label) => (
                                 <button
                                     key={label}
                                     className="panic-option"

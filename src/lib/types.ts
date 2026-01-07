@@ -33,6 +33,8 @@ export interface StructuredBuckets {
     title?: string;
     rawCapture?: string;
     router?: ScenarioRouterResult;
+    objections?: string[];
+    objectionsFallback?: boolean;
     objectionHandlers?: Record<string, TreeNode>;
 }
 

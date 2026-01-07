@@ -65,6 +65,8 @@ const NodeSchema: z.ZodType<any> = z.object({
     children: z.array(z.lazy(() => NodeSchema)).optional(),
 }).passthrough();
 
+const ObjectionsSchema = z.array(z.string().min(1).max(40)).min(4).max(8);
+
 const ProjectBundleSchema = z.object({
     title: z.string().optional(),
     goal: z.string().optional(),
@@ -91,7 +93,7 @@ const ProjectBundleSchema = z.object({
         'general_tough_conversation',
     ]).optional(),
     root: NodeSchema.optional(),
-    objections: z.array(z.string()).optional(),
+    objections: z.array(z.string().min(1).max(40)).min(4).max(8).optional(),
     objectionHandlers: z.record(z.string(), NodeSchema).optional(),
 }).passthrough();
 
@@ -175,6 +177,21 @@ function toStringArray(value: unknown): string[] {
         return value.split(',').map((item) => item.trim()).filter(Boolean);
     }
     return [];
+}
+
+function normalizeObjections(input: unknown): string[] {
+    const list = toStringArraySafe(input)
+        .map((label) => label.trim())
+        .filter(Boolean)
+        .filter((label) => label.length <= 40 && label.toLowerCase() !== 'other...');
+    const unique = Array.from(new Set(list));
+    return unique.slice(0, 8);
+}
+
+function validateObjections(input: unknown): { valid: boolean; value: string[] } {
+    const normalized = normalizeObjections(input);
+    const parsed = ObjectionsSchema.safeParse(normalized);
+    return parsed.success ? { valid: true, value: parsed.data } : { valid: false, value: normalized };
 }
 
 function buildScenarioContext(router?: ScenarioRouterResult, fallback?: Partial<StructuredBuckets>) {
@@ -403,6 +420,8 @@ async function repairBundleJSON(raw: string, userApiKey?: string) {
   "objections": string[],
   "objectionHandlers": { "Label": { "title": string, "talkingPoints"?: string[], "questions"?: string[], "sentiment"?: "negative", "children"?: [] } }
 }
+Constraints:
+- objections: 4-8 items, each <= 40 chars, no "Other..."
 Fix the JSON from the user and return only the repaired JSON.`;
 
     const response = await client.chat.completions.create({
@@ -417,7 +436,52 @@ Fix the JSON from the user and return only the repaired JSON.`;
     return response.choices[0]?.message?.content || '';
 }
 
-function normalizeBundle(parsed: any, capture: string) {
+async function generateObjectionsOnly(
+    router: ScenarioRouterResult,
+    buckets: Partial<StructuredBuckets>,
+    userApiKey?: string
+): Promise<string[]> {
+    const client = getOpenAIClient(userApiKey);
+    const scenario = buildScenarioContext(router, buckets);
+    const systemPrompt = `Generate a concise list of scenario-specific objections.
+Return JSON only: { "objections": ["short label", "..."] }
+Rules:
+- 4 to 8 items total
+- Each label <= 40 characters
+- No generic filler
+- Do NOT include "Other..."`;
+
+    const response = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: systemPrompt },
+            {
+                role: 'user',
+                content: `Scenario type: ${scenario.scenarioType}
+Goal: ${scenario.goal}
+Stakeholder: ${scenario.stakeholder}
+Tone: ${scenario.tone}
+Constraints: ${scenario.constraints.join('; ') || 'None'}
+Success criteria: ${scenario.successCriteria.join('; ') || 'None'}
+Taboo: ${scenario.taboo.join('; ') || 'None'}`
+            }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.5,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) throw new Error('No response from AI');
+    const parsed = JSON.parse(content) as { objections?: string[] };
+    return normalizeObjections(parsed.objections);
+}
+
+function normalizeBundle(
+    parsed: any,
+    capture: string,
+    objectionsOverride?: string[],
+    objectionsFallback?: boolean
+) {
     const routerType = normalizeScenarioType(parsed?.scenario_type);
     const routerCategory = normalizeScenarioCategory(parsed?.scenario_category, routerType);
     const router: ScenarioRouterResult = {
@@ -431,6 +495,12 @@ function normalizeBundle(parsed: any, capture: string) {
         taboo: toStringArray((parsed as any)?.taboo),
     };
 
+    const normalizedObjections = objectionsOverride || normalizeObjections(parsed?.objections);
+    const hasValidObjections = normalizedObjections.length >= 4;
+    const fallbackObjections = getDefaultObjections(routerCategory).filter((label) => label !== 'Other...');
+    const finalObjections = hasValidObjections ? normalizedObjections : fallbackObjections;
+    const fallbackFlag = objectionsFallback || !hasValidObjections;
+
     const buckets: StructuredBuckets = {
         goal: parsed?.goal || '',
         stakeholder: parsed?.stakeholder || '',
@@ -439,6 +509,8 @@ function normalizeBundle(parsed: any, capture: string) {
         tone: parsed?.tone || '',
         title: parsed?.title || '',
         rawCapture: capture,
+        objections: finalObjections,
+        objectionsFallback: fallbackFlag,
     };
 
     const rootSource = parsed?.root || parsed?.tree || parsed;
@@ -460,7 +532,8 @@ function normalizeBundle(parsed: any, capture: string) {
         buckets,
         tree,
         objectionHandlers: normalizedHandlers,
-        objections: parsed?.objections || labels,
+        objections: finalObjections,
+        objectionsFallback: fallbackFlag,
     };
 }
 
@@ -586,6 +659,33 @@ Objections: ${objections.join(', ')}`
     return normalized;
 }
 
+export async function generateScenarioObjectionsAction(
+    router: ScenarioRouterResult,
+    buckets: StructuredBuckets,
+    userApiKey?: string,
+    clientId?: string
+): Promise<{ objections: string[]; objectionsFallback: boolean }> {
+    await enforceRateLimit(clientId);
+    const category = getScenarioCategory(router);
+    let objectionsFallback = false;
+    let objections: string[] = [];
+    try {
+        objections = await generateObjectionsOnly(router, buckets, userApiKey);
+        const validated = validateObjections(objections);
+        if (!validated.valid) {
+            objectionsFallback = true;
+            objections = getDefaultObjections(category).filter((label) => label !== 'Other...');
+        } else {
+            objections = validated.value;
+        }
+    } catch (e) {
+        console.warn('[objections] generation failed', e);
+        objectionsFallback = true;
+        objections = getDefaultObjections(category).filter((label) => label !== 'Other...');
+    }
+    return { objections, objectionsFallback };
+}
+
 export async function generateProjectBundleAction(
     capture: string,
     userApiKey?: string,
@@ -601,7 +701,7 @@ export async function generateProjectBundleAction(
 - root node with 3 children: positive, neutral, negative
 - Each node includes 1-2 sayNow lines + 2-3 askNext questions
 - Each node must include exactly 3 children with sentiments positive/neutral/negative
-- objections: list of 6-10 short labels plus "Other..."
+- objections: list of 4-8 scenario-specific labels (<= 40 chars each, no "Other...")
 - objectionHandlers: map label -> node that handles the objection (sentiment "negative") with 3 children
 Keep strings short. Limit arrays to max 2-3 items.
 
@@ -640,21 +740,21 @@ Return JSON with keys:
     }
     console.log('[generateProjectBundleAction] ai_ms', Date.now() - aiStart);
 
-    let parsed: any = null;
+    let parsed: any | null = null;
     try {
         parsed = JSON.parse(raw);
     } catch {
         parsed = null;
     }
 
-    let validated = parsed ? ProjectBundleSchema.safeParse(parsed) : null;
-    if (!validated || !validated.success) {
+    let bundleValidation = parsed ? ProjectBundleSchema.safeParse(parsed) : null;
+    if (!bundleValidation || !bundleValidation.success) {
         const repaired = await repairBundleJSON(raw, userApiKey);
         try {
             const repairedParsed = JSON.parse(repaired);
-            validated = ProjectBundleSchema.safeParse(repairedParsed);
-            if (validated.success) {
-                parsed = validated.data;
+            bundleValidation = ProjectBundleSchema.safeParse(repairedParsed);
+            if (bundleValidation.success) {
+                parsed = bundleValidation.data;
             }
         } catch {
             // noop
@@ -665,7 +765,52 @@ Return JSON with keys:
         throw new Error('Invalid AI output');
     }
 
-    const normalized = normalizeBundle(parsed, capture);
+    const scenarioType = normalizeScenarioType(parsed?.scenario_type);
+    const scenarioCategory = normalizeScenarioCategory(parsed?.scenario_category, scenarioType);
+    const routerSeed: ScenarioRouterResult = {
+        scenario_type: scenarioType,
+        scenario_category: scenarioCategory,
+        goal: parsed?.goal || '',
+        stakeholder: parsed?.stakeholder || '',
+        tone: parsed?.tone || '',
+        constraints: toStringArray((parsed as any)?.constraints),
+        success_criteria: toStringArray((parsed as any)?.success_criteria),
+        taboo: toStringArray((parsed as any)?.taboo),
+    };
+    const bucketsSeed: Partial<StructuredBuckets> = {
+        goal: parsed?.goal || '',
+        stakeholder: parsed?.stakeholder || '',
+        context: parsed?.context || capture,
+        decisionFrame: parsed?.decisionFrame || '',
+        tone: parsed?.tone || '',
+    };
+
+    let objections = normalizeObjections(parsed?.objections);
+    let objectionsFallback = false;
+    const objectionsValidation = validateObjections(parsed?.objections);
+    if (!objectionsValidation.valid) {
+        console.warn('[objections] invalid, attempting repair');
+        try {
+            const repaired = await generateObjectionsOnly(routerSeed, bucketsSeed, userApiKey);
+            const repairedValidated = validateObjections(repaired);
+            if (repairedValidated.valid) {
+                objections = repairedValidated.value;
+            } else {
+                objectionsFallback = true;
+                objections = getDefaultObjections(scenarioCategory)
+                    .filter((label) => label !== 'Other...');
+            }
+        } catch (e) {
+            console.warn('[objections] repair failed', e);
+            objectionsFallback = true;
+            objections = getDefaultObjections(scenarioCategory)
+                .filter((label) => label !== 'Other...');
+        }
+    } else {
+        objections = objectionsValidation.value;
+    }
+
+    const normalized = normalizeBundle(parsed, capture, objections, objectionsFallback);
     console.log('[generateProjectBundleAction] total_ms', Date.now() - start);
     return {
         buckets: normalized.buckets,
@@ -1104,6 +1249,7 @@ export async function generateNextMovesAction(
     projectGoal?: string,
     router?: ScenarioRouterResult,
     lastMoveLabel?: string,
+    objectionHint?: string,
     userApiKey?: string,
     clientId?: string,
     useFallback?: boolean
@@ -1161,6 +1307,7 @@ Success criteria: ${scenarioContext.successCriteria.join('; ') || 'None'}
 Taboo: ${scenarioContext.taboo.join('; ') || 'None'}
 
 Last move selected: ${lastMoveLabel || 'N/A'}
+Objection hint: ${objectionHint || 'None'}
 Current node title: ${currentNode.title}
 Say-this points: ${currentNode.talkingPoints.join(' | ') || 'None'}
 Questions: ${currentNode.questions.join(' | ') || 'None'}`
@@ -1183,6 +1330,7 @@ Questions: ${currentNode.questions.join(' | ') || 'None'}`
             projectGoal,
             router,
             lastMoveLabel,
+            objectionHint,
             userApiKey,
             clientId,
             true

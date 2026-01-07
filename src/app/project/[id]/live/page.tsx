@@ -64,7 +64,7 @@ export default function LiveModePage({ params }: { params: Promise<{ id: string 
     }
 
     return (
-        <ErrorBoundary title="Call view failed to render" onRetry={loadProject}>
+        <ErrorBoundary title="Conversation view failed to render" onRetry={loadProject}>
             <FocusedView
                 project={project}
                 onProjectUpdate={handleProjectUpdate}

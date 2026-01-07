@@ -218,7 +218,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                             href={`/app/project/${project.id}/live`}
                             className="btn btn-primary btn-lg project-start"
                         >
-                            ▶ Start Call Mode
+                            ▶ Start Conversation Mode
                         </Link>
                     ) : (
                         <>
@@ -240,7 +240,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                                 href={`/app/project/${project.id}/live`}
                                 className="btn btn-primary btn-lg project-start"
                             >
-                                ▶ Start Live Mode
+                                ▶ Start Conversation Mode
                             </Link>
                         </>
                     )}
@@ -443,11 +443,11 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                     </>
                 )}
 
-                {/* Call History */}
+                {/* Conversation History */}
                 {project.callHistory && project.callHistory.length > 0 && (
                     <div className="card mt-lg">
                         <h2 style={{ margin: 0, marginBottom: 'var(--space-md)' }}>
-                            📞 Call History ({project.callHistory.length})
+                            💬 Conversation History ({project.callHistory.length})
                         </h2>
                         <div className="flex flex-col gap-md">
                             {project.callHistory.slice().reverse().map((call) => (

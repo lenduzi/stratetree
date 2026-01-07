@@ -76,7 +76,7 @@ export default function LandingPage() {
         </div>
 
         <div className="landing-empty">
-          <h2>Prepare your first call</h2>
+          <h2>Prepare your first conversation</h2>
           <p>Use the box above to turn your situation into a live coaching plan.</p>
         </div>
       </main>
