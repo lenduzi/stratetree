@@ -168,31 +168,33 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
     return (
         <div className="focused-view">
-            <header className="header">
-                <div className="flex items-center gap-md">
+            <header className="header project-header">
+                <div className="flex items-center gap-md project-header-main">
                     <Link href="/" className="btn btn-secondary btn-sm">
                         ← Back
                     </Link>
                     <div>
-                        <h1 style={{ fontSize: '1.1rem', margin: 0 }}>{project.name}</h1>
+                        <h1 className="project-title" style={{ fontSize: '1.1rem', margin: 0 }}>{project.name}</h1>
                         <div className="text-muted" style={{ fontSize: '0.8rem' }}>
                             Preparation Mode
                         </div>
                     </div>
                 </div>
-                <div className="flex items-center gap-sm">
-                    <ThemeToggle />
+                <div className="flex items-center gap-sm project-header-actions">
+                    <span className="project-theme-toggle">
+                        <ThemeToggle />
+                    </span>
                     {isStructured ? (
                         <Link
                             href={`/project/${project.id}/live`}
-                            className="btn btn-primary btn-lg"
+                            className="btn btn-primary btn-lg project-start"
                         >
                             ▶ Start Call Mode
                         </Link>
                     ) : (
                         <>
                             <button
-                                className="btn btn-secondary"
+                                className="btn btn-secondary project-generate"
                                 onClick={handleGenerateClick}
                                 disabled={generating}
                             >
@@ -207,7 +209,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                             </button>
                             <Link
                                 href={`/project/${project.id}/live`}
-                                className="btn btn-primary btn-lg"
+                                className="btn btn-primary btn-lg project-start"
                             >
                                 ▶ Start Live Mode
                             </Link>

@@ -123,22 +123,22 @@ export default function HomePage() {
           <span className="logo-icon">🌳</span>
           <span>Stratetree</span>
         </Link>
-        <div className="flex items-center gap-sm">
-          <button className="btn btn-secondary btn-sm" onClick={handleImport}>
+        <div className="flex items-center gap-sm header-actions">
+          <button className="btn btn-secondary btn-sm header-action header-import" onClick={handleImport}>
             Import
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={handleExport}>
+          <button className="btn btn-secondary btn-sm header-action header-export" onClick={handleExport}>
             Export
           </button>
-          <Link href="/settings" className="btn btn-secondary btn-sm">
+          <Link href="/settings" className="btn btn-secondary btn-sm header-action">
             ⚙️ Settings
           </Link>
           {user ? (
-            <button className="btn btn-secondary btn-sm" onClick={handleLogout}>
+            <button className="btn btn-secondary btn-sm header-action" onClick={handleLogout}>
               Logout ({user.email?.split('@')[0]})
             </button>
           ) : (
-            <Link href="/login" className="btn btn-primary btn-sm">
+            <Link href="/login" className="btn btn-primary btn-sm header-action">
               Sign In
             </Link>
           )}
@@ -147,13 +147,13 @@ export default function HomePage() {
       </header>
 
       <main className="container">
-        <div className="flex items-center justify-between mb-lg">
+        <div className="flex items-center justify-between mb-lg project-hero">
           <div>
             <h1>Your Strategy Trees</h1>
             <p className="text-muted">Prepare for calls with decision trees</p>
           </div>
           <button
-            className="btn btn-primary btn-lg"
+            className="btn btn-primary btn-lg project-cta project-cta-desktop"
             onClick={() => setShowNewModal(true)}
           >
             + New Project
@@ -194,7 +194,7 @@ export default function HomePage() {
             <div className="empty-state-title">No projects yet</div>
             <p>Create your first strategy tree to get started.</p>
             <button
-              className="btn btn-primary mt-lg"
+              className="btn btn-primary mt-lg project-cta"
               onClick={() => setShowNewModal(true)}
             >
               + New Project
@@ -243,6 +243,13 @@ export default function HomePage() {
         )}
       </main>
 
+      <button
+        className="btn btn-primary btn-lg project-cta project-cta-sticky"
+        onClick={() => setShowNewModal(true)}
+      >
+        + New Project
+      </button>
+
       {showNewModal && (
         <NewProjectModal
           onClose={() => setShowNewModal(false)}
@@ -272,18 +279,28 @@ function NewProjectModal({
   const [draftId, setDraftId] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const shouldProcessRef = useRef(true);
 
   useEffect(() => {
     setUseHold(window.matchMedia('(pointer: coarse)').matches);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      stopRecording(false);
+    };
+  }, []);
+
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
+      shouldProcessRef.current = true;
 
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) {
@@ -292,9 +309,16 @@ function NewProjectModal({
       };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        const tracks = stream.getTracks();
+        const tracks = mediaStreamRef.current?.getTracks() || [];
         tracks.forEach(track => track.stop());
+        mediaStreamRef.current = null;
+
+        if (!shouldProcessRef.current) {
+          setIsProcessing(false);
+          return;
+        }
+
+        const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
         await handleTranscription(audioBlob);
       };
 
@@ -306,11 +330,23 @@ function NewProjectModal({
     }
   };
 
-  const stopRecording = () => {
+  const stopRecording = (shouldProcess: boolean) => {
+    shouldProcessRef.current = shouldProcess;
+    if (!shouldProcess && mediaRecorderRef.current) {
+      mediaRecorderRef.current.ondataavailable = null;
+      mediaRecorderRef.current.onstop = null;
+    }
     if (mediaRecorderRef.current && isListening) {
       mediaRecorderRef.current.stop();
       setIsListening(false);
       setIsProcessing(true);
+    }
+    const tracks = mediaStreamRef.current?.getTracks() || [];
+    tracks.forEach(track => track.stop());
+    mediaStreamRef.current = null;
+    if (!shouldProcess) {
+      setIsListening(false);
+      setIsProcessing(false);
     }
   };
 
@@ -332,7 +368,7 @@ function NewProjectModal({
 
   const toggleListening = async () => {
     if (isListening) {
-      stopRecording();
+      stopRecording(true);
     } else {
       await startRecording();
     }
@@ -393,8 +429,13 @@ function NewProjectModal({
     }
   };
 
+  const handleClose = () => {
+    stopRecording(false);
+    onClose();
+  };
+
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onClick={handleClose}>
       <div className="modal capture-modal" onClick={(e) => e.stopPropagation()}>
         {step === 'capture' ? (
           <>
@@ -411,7 +452,10 @@ function NewProjectModal({
               >
                 {isListening ? '◼' : '🎤'}
               </button>
-              <div className="capture-label">Hold to talk</div>
+              <div className="capture-label">
+                Tap to talk
+                {isListening && <span className="capture-recording">Recording…</span>}
+              </div>
               <textarea
                 className="capture-textarea"
                 value={captureText}
@@ -428,7 +472,7 @@ function NewProjectModal({
               {error && <div className="text-muted" style={{ color: 'var(--danger)' }}>{error}</div>}
             </div>
             <div className="modal-actions">
-              <button className="btn btn-secondary" onClick={onClose}>
+              <button className="btn btn-secondary" onClick={handleClose}>
                 Cancel
               </button>
               <button

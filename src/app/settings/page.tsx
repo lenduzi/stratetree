@@ -1,15 +1,17 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { isServerApiKeyConfigured } from '@/lib/actions';
 import { getBrowserApiKey, setBrowserApiKey, clearBrowserApiKey } from '@/lib/settings';
+import { exportAllData, importData } from '@/lib/db';
 
 export default function SettingsPage() {
     const [isServerConfigured, setIsServerConfigured] = useState<boolean | null>(null);
     const [browserKey, setBrowserKey] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [showKey, setShowKey] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
         checkConfig();
@@ -36,6 +38,30 @@ export default function SettingsPage() {
             clearBrowserApiKey();
             setBrowserKey('');
         }
+    };
+
+    const handleExport = async () => {
+        const data = await exportAllData();
+        const blob = new Blob([data], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `stratetree-export-${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const handleImport = () => {
+        fileInputRef.current?.click();
+    };
+
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const text = await file.text();
+        const imported = await importData(text);
+        alert(`Imported ${imported} projects.`);
+        e.target.value = '';
     };
 
     const hasAnyKey = isServerConfigured || !!browserKey;
@@ -148,6 +174,25 @@ export default function SettingsPage() {
                         <div><span className="kbd">F</span> Toggle full tree view</div>
                         <div><span className="kbd">P</span> Panic button</div>
                     </div>
+                </div>
+
+                <div className="card mt-lg">
+                    <h2 style={{ marginBottom: 'var(--space-md)' }}>Data Management</h2>
+                    <div className="flex gap-sm">
+                        <button className="btn btn-secondary" onClick={handleImport}>
+                            Import
+                        </button>
+                        <button className="btn btn-secondary" onClick={handleExport}>
+                            Export
+                        </button>
+                    </div>
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="application/json"
+                        onChange={handleFileChange}
+                        style={{ display: 'none' }}
+                    />
                 </div>
 
                 <Link href="/" className="btn btn-secondary mt-lg">
