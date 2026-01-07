@@ -11,10 +11,11 @@ interface PanicButtonProps {
     projectGoal?: string;
     router?: ScenarioRouterResult;
     lastMoveLabel?: string;
+    nudgeActive?: boolean;
     onNewNodes?: (nodes: TreeNode[]) => void;
 }
 
-export function PanicButton({ currentNode, projectGoal, router, lastMoveLabel, onNewNodes }: PanicButtonProps) {
+export function PanicButton({ currentNode, projectGoal, router, lastMoveLabel, nudgeActive, onNewNodes }: PanicButtonProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [isLoadingOptions, setIsLoadingOptions] = useState(false);
@@ -142,7 +143,7 @@ export function PanicButton({ currentNode, projectGoal, router, lastMoveLabel, o
             )}
 
             <button
-                className="btn btn-panic btn-lg"
+                className={`btn btn-panic btn-lg${nudgeActive ? ' panic-pulse' : ''}`}
                 onClick={() => setIsOpen(!isOpen)}
                 title="Panic Button (P)"
             >

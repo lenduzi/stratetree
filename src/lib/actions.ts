@@ -113,6 +113,7 @@ function consumeRateLimit(key: string, max: number, windowMs: number) {
 }
 
 async function enforceRateLimit(clientId?: string) {
+    if (process.env.NODE_ENV !== 'production') return;
     const ip = await getRequestIp();
     if (ip) {
         consumeRateLimit(`ip:${ip}`, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
@@ -206,6 +207,26 @@ Use arrays (can be empty). Be concise, grounded, and avoid sales assumptions unl
         success_criteria: toStringArray((parsed as any).success_criteria),
         taboo: toStringArray((parsed as any).taboo),
     };
+}
+
+export async function extractStructuredBucketsAction(
+    capture: string,
+    router: ScenarioRouterResult,
+    userApiKey?: string,
+    clientId?: string
+): Promise<StructuredBuckets> {
+    await enforceRateLimit(clientId);
+    return extractStructuredBuckets(capture, userApiKey, router);
+}
+
+export async function generateTreeFromBucketsAction(
+    buckets: StructuredBuckets,
+    router: ScenarioRouterResult,
+    userApiKey?: string,
+    clientId?: string
+): Promise<TreeNode> {
+    await enforceRateLimit(clientId);
+    return generateTreeFromBuckets(buckets, userApiKey, router);
 }
 
 // Generate a decision tree from a scenario description
@@ -564,13 +585,30 @@ export async function generateNextMovesAction(
     router?: ScenarioRouterResult,
     lastMoveLabel?: string,
     userApiKey?: string,
-    clientId?: string
+    clientId?: string,
+    useFallback?: boolean
 ): Promise<TreeNode[]> {
     await enforceRateLimit(clientId);
     const client = getOpenAIClient(userApiKey);
     const scenarioContext = buildScenarioContext(router);
 
-    const systemPrompt = `Generate 2-4 next moves for the current node.
+    const systemPrompt = useFallback
+        ? `Generate 2-4 safe next moves for the current node.
+Keep them generic, calm, and forward-moving. Avoid jargon.
+Each move must be a short, actionable title (max ~40 chars) and include 1-2 "talkingPoints" and 1-2 "questions".
+Return a JSON object using this structure:
+{
+  "nodes": [
+    {
+      "title": "Short option title",
+      "talkingPoints": ["What to say"],
+      "questions": ["Question to ask?"],
+      "sentiment": "positive" | "neutral" | "negative",
+      "children": []
+    }
+  ]
+}`
+        : `Generate 2-4 next moves for the current node.
 Each move must be a short, actionable title (max ~40 chars) and include 1-2 "talkingPoints" and 1-2 "questions".
 Neutral branches must keep momentum and include a next step.
 ${SCENARIO_TREE_TEMPLATES[scenarioContext.scenarioType]}
@@ -618,6 +656,54 @@ Questions: ${currentNode.questions.join(' | ') || 'None'}`
     const parsed = JSON.parse(content);
     const nodes = Array.isArray(parsed) ? parsed : parsed.nodes || [];
     return (nodes as TreeNode[]).map(addIdsToTree);
+}
+
+export async function generateAskNextAction(
+    currentNode: TreeNode,
+    projectGoal?: string,
+    router?: ScenarioRouterResult,
+    lastMoveLabel?: string,
+    userApiKey?: string,
+    clientId?: string
+): Promise<string[]> {
+    await enforceRateLimit(clientId);
+    const client = getOpenAIClient(userApiKey);
+    const scenarioContext = buildScenarioContext(router);
+
+    const systemPrompt = `Generate 2-3 concise "Ask next" questions for the current node.
+Questions should keep momentum, be open-ended, and avoid dead ends.
+${SCENARIO_TREE_TEMPLATES[scenarioContext.scenarioType]}
+
+Return a JSON object: { "questions": ["...", "..."] }`;
+
+    const response = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: systemPrompt },
+            {
+                role: 'user',
+                content: `Scenario type: ${scenarioContext.scenarioType}
+Goal: ${projectGoal || scenarioContext.goal}
+Stakeholder: ${scenarioContext.stakeholder}
+Tone: ${scenarioContext.tone}
+Constraints: ${scenarioContext.constraints.join('; ') || 'None'}
+Success criteria: ${scenarioContext.successCriteria.join('; ') || 'None'}
+Taboo: ${scenarioContext.taboo.join('; ') || 'None'}
+
+Last move selected: ${lastMoveLabel || 'N/A'}
+Current node title: ${currentNode.title}
+Say-this points: ${currentNode.talkingPoints.join(' | ') || 'None'}`
+            }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.6,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) throw new Error('No response from AI');
+
+    const parsed = JSON.parse(content) as { questions?: string[] };
+    return (parsed.questions || []).map((q) => q.trim()).filter(Boolean);
 }
 
 // Generate call summary from path taken

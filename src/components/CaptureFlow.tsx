@@ -1,15 +1,23 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { Project } from '@/lib/types';
 import { saveProject } from '@/lib/db';
-import { structureProjectAction, transcribeAudioAction } from '@/lib/actions';
+import { extractStructuredBucketsAction, generateTreeFromBucketsAction, routeScenarioAction, transcribeAudioAction } from '@/lib/actions';
 import { getBrowserApiKey } from '@/lib/settings';
 import { getClientId } from '@/lib/client-id';
 import Link from 'next/link';
 
 const MAX_GUEST_PER_DAY = 3;
+const STRUCTURING_STAGES = [
+  'Distilling your goal…',
+  'Understanding who you’re talking to…',
+  'Creating scenarios…',
+  'Preparing your talk track…',
+  'Finalizing…',
+];
+const STRUCTURING_TARGETS = [10, 30, 55, 80, 95];
 
 type CaptureFlowProps = {
   title?: string;
@@ -39,6 +47,14 @@ export function CaptureFlow({
   const [error, setError] = useState<string | null>(null);
   const [limitReached, setLimitReached] = useState(false);
   const [draftId, setDraftId] = useState<string | null>(null);
+  const {
+    stageLabel,
+    progress,
+    startProgress,
+    advanceStage,
+    finishProgress,
+    resetProgress,
+  } = useStagedProgress(STRUCTURING_STAGES, STRUCTURING_TARGETS, 700);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -51,7 +67,14 @@ export function CaptureFlow({
     };
   }, []);
 
+  useEffect(() => {
+    if (step !== 'structuring') {
+      resetProgress();
+    }
+  }, [step, resetProgress]);
+
   const getGuestCount = () => {
+    if (process.env.NODE_ENV !== 'production') return { count: 0, date: '' };
     if (typeof window === 'undefined') return { count: 0, date: '' };
     const date = localStorage.getItem('yapmap-guest-date') || '';
     const count = parseInt(localStorage.getItem('yapmap-guest-count') || '0', 10);
@@ -59,6 +82,7 @@ export function CaptureFlow({
   };
 
   const incrementGuestCount = () => {
+    if (process.env.NODE_ENV !== 'production') return;
     if (typeof window === 'undefined') return;
     const today = new Date().toISOString().slice(0, 10);
     const { count, date } = getGuestCount();
@@ -68,6 +92,7 @@ export function CaptureFlow({
   };
 
   const canCreateGuestProject = () => {
+    if (process.env.NODE_ENV !== 'production') return true;
     if (typeof window === 'undefined') return true;
     const today = new Date().toISOString().slice(0, 10);
     const { count, date } = getGuestCount();
@@ -170,6 +195,7 @@ export function CaptureFlow({
 
     setIsProcessing(true);
     setStep('structuring');
+    startProgress();
     setError(null);
 
     const id = draftId || uuidv4();
@@ -198,6 +224,7 @@ export function CaptureFlow({
     };
 
     await saveProject(draft);
+    await advanceStage();
     if (isGuest) {
       incrementGuestCount();
     }
@@ -205,7 +232,12 @@ export function CaptureFlow({
     try {
       const browserKey = getBrowserApiKey();
       const clientId = getClientId();
-      const { buckets, tree, router } = await structureProjectAction(trimmed, browserKey || undefined, clientId);
+      const router = await routeScenarioAction(trimmed, browserKey || undefined, clientId);
+      await advanceStage();
+      const buckets = await extractStructuredBucketsAction(trimmed, router, browserKey || undefined, clientId);
+      await advanceStage();
+      const tree = await generateTreeFromBucketsAction(buckets, router, browserKey || undefined, clientId);
+      await advanceStage();
       const title = (buckets.title || `${buckets.stakeholder} — ${buckets.goal}`).trim() || 'New Project';
       const updated: Project = {
         ...draft,
@@ -215,10 +247,12 @@ export function CaptureFlow({
         structured: { ...buckets, rawCapture: trimmed, title, router },
       };
       await saveProject(updated);
+      finishProgress();
       onComplete(id);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to structure project');
       setStep('capture');
+      resetProgress();
     } finally {
       setIsProcessing(false);
     }
@@ -290,6 +324,10 @@ export function CaptureFlow({
       ) : (
         <div className="structuring-state">
           <h2 className="modal-title">Structuring your call…</h2>
+          <div className="structuring-status">{stageLabel}</div>
+          <div className="structuring-progress">
+            <div className="structuring-progress-bar" style={{ width: `${progress}%` }} />
+          </div>
           <div className="structuring-skeleton">
             {['Goal', 'Who am I talking to?', 'What’s the situation?', 'If they say X → I say Y'].map((label) => (
               <div key={label} className="skeleton-bucket">
@@ -303,4 +341,86 @@ export function CaptureFlow({
       )}
     </>
   );
+}
+
+function useStagedProgress(stages: string[], targets: number[], minStageMs: number) {
+  const [stageIndex, setStageIndex] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const [isRunning, setIsRunning] = useState(false);
+  const lastStageAtRef = useRef<number>(0);
+  const timerRef = useRef<number | null>(null);
+
+  const prefersReducedMotion = typeof window !== 'undefined'
+    ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    : false;
+
+  const animateToTarget = useCallback((target: number) => {
+    if (prefersReducedMotion) {
+      setProgress(target);
+      return;
+    }
+    if (timerRef.current) {
+      window.clearInterval(timerRef.current);
+    }
+    timerRef.current = window.setInterval(() => {
+      setProgress((prev) => {
+        if (prev >= target) return prev;
+        const delta = Math.max(0.6, (target - prev) * 0.08);
+        return Math.min(target, prev + delta);
+      });
+    }, 80);
+  }, [prefersReducedMotion]);
+
+  useEffect(() => {
+    if (!isRunning) return;
+    const target = targets[Math.min(stageIndex, targets.length - 1)] || 0;
+    animateToTarget(target);
+    return () => {
+      if (timerRef.current) {
+        window.clearInterval(timerRef.current);
+      }
+    };
+  }, [stageIndex, targets, animateToTarget, isRunning]);
+
+  const startProgress = useCallback(() => {
+    setIsRunning(true);
+    setStageIndex(0);
+    setProgress(0);
+    lastStageAtRef.current = Date.now();
+  }, []);
+
+  const advanceStage = useCallback(async () => {
+    const elapsed = Date.now() - lastStageAtRef.current;
+    if (elapsed < minStageMs) {
+      await new Promise((resolve) => setTimeout(resolve, minStageMs - elapsed));
+    }
+    lastStageAtRef.current = Date.now();
+    setStageIndex((prev) => Math.min(prev + 1, stages.length - 1));
+  }, [minStageMs, stages.length]);
+
+  const finishProgress = useCallback(() => {
+    setIsRunning(false);
+    setProgress(100);
+    if (timerRef.current) {
+      window.clearInterval(timerRef.current);
+    }
+  }, []);
+
+  const resetProgress = useCallback(() => {
+    setIsRunning(false);
+    setStageIndex(0);
+    setProgress(0);
+    if (timerRef.current) {
+      window.clearInterval(timerRef.current);
+    }
+  }, []);
+
+  return {
+    stageLabel: stages[stageIndex] || stages[0],
+    progress,
+    startProgress,
+    advanceStage,
+    finishProgress,
+    resetProgress,
+  };
 }

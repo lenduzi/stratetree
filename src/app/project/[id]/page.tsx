@@ -24,7 +24,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     const [showConfirmGen, setShowConfirmGen] = useState(false);
     const [editingKey, setEditingKey] = useState<EditableBucketKey | null>(null);
     const [draftValue, setDraftValue] = useState('');
-    const [regeneratingKey, setRegeneratingKey] = useState<EditableBucketKey | null>(null);
+    const [bucketLoading, setBucketLoading] = useState<Record<string, boolean>>({});
     const [showOptional, setShowOptional] = useState(false);
     const [showRawCapture, setShowRawCapture] = useState(false);
 
@@ -103,7 +103,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
     const handleRegenerate = async (key: EditableBucketKey) => {
         if (!project?.structured?.rawCapture) return;
-        setRegeneratingKey(key);
+        setBucketLoading((prev) => ({ ...prev, [key]: true }));
         setError(null);
         try {
             const browserKey = getBrowserApiKey();
@@ -126,9 +126,11 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Failed to regenerate');
         } finally {
-            setRegeneratingKey(null);
+            setBucketLoading((prev) => ({ ...prev, [key]: false }));
         }
     };
+
+    const isBucketLoading = (key: EditableBucketKey) => !!bucketLoading[key];
 
     if (loading) {
         return (
@@ -268,16 +270,18 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                                 <button
                                     className="bucket-action"
                                     onClick={() => startEdit('title')}
+                                    disabled={isBucketLoading('title')}
                                 >
                                     ✎ Edit
                                 </button>
                                 <button
                                     className="bucket-action"
                                     onClick={() => handleRegenerate('title')}
-                                    disabled={regeneratingKey === 'title'}
+                                    disabled={isBucketLoading('title')}
                                 >
                                     ↻
                                 </button>
+                                {isBucketLoading('title') && <span className="bucket-spinner" />}
                             </div>
                         </div>
 
@@ -290,16 +294,18 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                                             <button
                                                 className="bucket-action"
                                                 onClick={() => startEdit(key)}
+                                                disabled={isBucketLoading(key)}
                                             >
                                                 ✎ Edit
                                             </button>
                                             <button
                                                 className="bucket-action"
                                                 onClick={() => handleRegenerate(key)}
-                                                disabled={regeneratingKey === key}
+                                                disabled={isBucketLoading(key)}
                                             >
                                                 ↻
                                             </button>
+                                            {isBucketLoading(key) && <span className="bucket-spinner" />}
                                         </div>
                                     </div>
                                     {editingKey === key ? (
@@ -311,7 +317,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                                             rows={3}
                                         />
                                     ) : (
-                                        <div className="bucket-body">
+                                        <div className={`bucket-body${isBucketLoading(key) ? ' is-loading' : ''}`}>
                                             {structured?.[key] || '—'}
                                         </div>
                                     )}
@@ -338,16 +344,18 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                                                             <button
                                                                 className="bucket-action"
                                                                 onClick={() => startEdit(key)}
+                                                                disabled={isBucketLoading(key)}
                                                             >
                                                                 ✎ Edit
                                                             </button>
                                                             <button
                                                                 className="bucket-action"
                                                                 onClick={() => handleRegenerate(key)}
-                                                                disabled={regeneratingKey === key}
+                                                                disabled={isBucketLoading(key)}
                                                             >
                                                                 ↻
                                                             </button>
+                                                            {isBucketLoading(key) && <span className="bucket-spinner" />}
                                                         </div>
                                                     </div>
                                                     {editingKey === key ? (
@@ -359,7 +367,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                                                             rows={3}
                                                         />
                                                     ) : (
-                                                        <div className="bucket-body">
+                                                        <div className={`bucket-body${isBucketLoading(key) ? ' is-loading' : ''}`}>
                                                             {structured[key]}
                                                         </div>
                                                     )}
