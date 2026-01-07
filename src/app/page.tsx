@@ -444,10 +444,10 @@ function NewProjectModal({
               <button
                 type="button"
                 className={`capture-mic ${isListening ? 'is-listening' : ''}`}
-                onClick={!useHold ? toggleListening : undefined}
-                onPointerDown={useHold ? startRecording : undefined}
-                onPointerUp={useHold ? stopRecording : undefined}
-                onPointerLeave={useHold ? stopRecording : undefined}
+                onClick={!useHold ? () => toggleListening() : undefined}
+                onPointerDown={useHold ? (e) => { e.preventDefault(); startRecording(); } : undefined}
+                onPointerUp={useHold ? (e) => { e.preventDefault(); stopRecording(true); } : undefined}
+                onPointerLeave={useHold ? (e) => { e.preventDefault(); stopRecording(true); } : undefined}
                 disabled={isProcessing}
               >
                 {isListening ? '◼' : '🎤'}
