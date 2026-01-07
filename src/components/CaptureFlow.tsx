@@ -205,14 +205,14 @@ export function CaptureFlow({
     try {
       const browserKey = getBrowserApiKey();
       const clientId = getClientId();
-      const { buckets, tree } = await structureProjectAction(trimmed, browserKey || undefined, clientId);
+      const { buckets, tree, router } = await structureProjectAction(trimmed, browserKey || undefined, clientId);
       const title = (buckets.title || `${buckets.stakeholder} — ${buckets.goal}`).trim() || 'New Project';
       const updated: Project = {
         ...draft,
         name: title,
         description: buckets.context || trimmed,
         rootNode: tree,
-        structured: { ...buckets, rawCapture: trimmed, title },
+        structured: { ...buckets, rawCapture: trimmed, title, router },
       };
       await saveProject(updated);
       onComplete(id);

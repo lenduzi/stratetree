@@ -32,6 +32,27 @@ export interface StructuredBuckets {
     tone?: string;
     title?: string;
     rawCapture?: string;
+    router?: ScenarioRouterResult;
+}
+
+export type ScenarioType =
+    | 'salary_negotiation'
+    | 'neighbor_conflict'
+    | 'sales_call'
+    | 'partnership'
+    | 'interview'
+    | 'performance_feedback'
+    | 'personal_boundary'
+    | 'other';
+
+export interface ScenarioRouterResult {
+    scenario_type: ScenarioType;
+    goal: string;
+    stakeholder: string;
+    tone: string;
+    constraints: string[];
+    success_criteria: string[];
+    taboo: string[];
 }
 
 // For navigation state in live mode

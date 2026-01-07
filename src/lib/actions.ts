@@ -2,7 +2,7 @@
 
 import OpenAI from 'openai';
 import { headers } from 'next/headers';
-import { TreeNode, CallSummary, StructuredBuckets } from './types';
+import { TreeNode, CallSummary, StructuredBuckets, ScenarioRouterResult, ScenarioType } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
 // Helper: Add unique IDs and sentiments to all nodes in a tree
@@ -28,6 +28,68 @@ function getOpenAIClient(userApiKey?: string): OpenAI {
 const RATE_LIMIT_MAX = 20;
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+
+const SCENARIO_TREE_TEMPLATES: Record<ScenarioType, string> = {
+    salary_negotiation: `Focus on compensation bands, scope, performance, timing, and trade-offs. Keep language professional, data-backed, and non-confrontational.`,
+    neighbor_conflict: `Prioritize de-escalation, empathy, shared solutions, and respectful boundaries. Avoid legal threats or shaming tone.`,
+    sales_call: `Emphasize discovery, value articulation, ROI, risk reduction, and buying process clarity.`,
+    partnership: `Center mutual value, alignment, scope, timelines, and joint success metrics. Keep collaborative tone.`,
+    interview: `Focus on role fit, evidence, expectations, timeline, and next steps. Keep confident, curious tone.`,
+    performance_feedback: `Use clear observations, impact, and growth framing. Keep it constructive and specific.`,
+    personal_boundary: `Use "I" statements, clarity, and calm boundaries. Offer alternatives and space for response.`,
+    other: `Keep it practical, calm, and forward-moving. Avoid generic sales patterns.`,
+};
+
+const SCENARIO_PANIC_TEMPLATES: Record<ScenarioType, string> = {
+    salary_negotiation: `Include options about budget limits, timing, scope changes, market data, total comp, and HR policy.`,
+    neighbor_conflict: `Include options for apology, clarification, compromise, boundaries, and practical next steps.`,
+    sales_call: `Include options for value clarification, budget/timeline, authority, and proof points.`,
+    partnership: `Include options for scope alignment, mutual value, timeline, and risk mitigation.`,
+    interview: `Include options for clarifying expectations, examples, and next steps.`,
+    performance_feedback: `Include options for clarifying impact, expectations, and growth plan.`,
+    personal_boundary: `Include options for restating boundaries, empathy, and offering alternatives.`,
+    other: `Keep options grounded, respectful, and actionable.`,
+};
+
+function normalizeScenarioType(value: string | undefined): ScenarioType {
+    const allowed: ScenarioType[] = [
+        'salary_negotiation',
+        'neighbor_conflict',
+        'sales_call',
+        'partnership',
+        'interview',
+        'performance_feedback',
+        'personal_boundary',
+        'other',
+    ];
+    if (value && allowed.includes(value as ScenarioType)) {
+        return value as ScenarioType;
+    }
+    return 'other';
+}
+
+function toStringArray(value: unknown): string[] {
+    if (Array.isArray(value)) {
+        return value.map((item) => String(item)).filter(Boolean);
+    }
+    if (typeof value === 'string' && value.trim()) {
+        return value.split(',').map((item) => item.trim()).filter(Boolean);
+    }
+    return [];
+}
+
+function buildScenarioContext(router?: ScenarioRouterResult, fallback?: Partial<StructuredBuckets>) {
+    const scenarioType = normalizeScenarioType(router?.scenario_type);
+    return {
+        scenarioType,
+        goal: router?.goal || fallback?.goal || '',
+        stakeholder: router?.stakeholder || fallback?.stakeholder || '',
+        tone: router?.tone || fallback?.tone || '',
+        constraints: router?.constraints || [],
+        successCriteria: router?.success_criteria || [],
+        taboo: router?.taboo || [],
+    };
+}
 
 async function getRequestIp(): Promise<string | null> {
     const headerList = await headers();
@@ -60,17 +122,20 @@ async function enforceRateLimit(clientId?: string) {
     }
 }
 
-// Generate a decision tree from a scenario description
-export async function generateTreeAction(
-    scenario: string,
-    userApiKey?: string,
-    clientId?: string
-): Promise<TreeNode> {
-    await enforceRateLimit(clientId);
-    const client = getOpenAIClient(userApiKey);
+function buildTreeSystemPrompt(router?: ScenarioRouterResult, buckets?: Partial<StructuredBuckets>) {
+    const scenarioContext = buildScenarioContext(router, buckets);
+    const scenarioNote = SCENARIO_TREE_TEMPLATES[scenarioContext.scenarioType];
+    return `You are an expert call strategist. Generate a decision tree for handling different conversation paths.
+Scenario type: ${scenarioContext.scenarioType}
+Guidance: ${scenarioNote}
 
-    const systemPrompt = `You are an expert sales strategist helping prepare for business calls. 
-Generate a decision tree for handling different conversation paths.
+Context:
+- Goal: ${scenarioContext.goal}
+- Stakeholder: ${scenarioContext.stakeholder}
+- Tone: ${scenarioContext.tone}
+- Constraints: ${scenarioContext.constraints.join('; ') || 'None'}
+- Success criteria: ${scenarioContext.successCriteria.join('; ') || 'None'}
+- Taboo: ${scenarioContext.taboo.join('; ') || 'None'}
 
 Output a JSON object with this structure:
 {
@@ -82,21 +147,78 @@ Output a JSON object with this structure:
       "title": "Possible response scenario",
       "talkingPoints": ["What to say in this case"],
       "questions": ["Follow-up discovery question?"],
-      "sentiment": "positive", // Use "positive", "neutral", or "negative"
+      "sentiment": "positive",
       "children": [...]
     }
   ]
 }
 
 IMPORTANT RULES:
-- Each node SHOULD have a "sentiment": "positive" (green, progress), "neutral" (yellow, info-seeking), or "negative" (red, objection/blocker)
-- Each node MUST have 1-3 "questions" - these are discovery questions to ask the client
-- Questions should uncover needs, pain points, priorities, or decision criteria
-- Make questions open-ended and insightful (not yes/no questions)
-- Create 3-5 initial branches from the root, and 2-3 sub-branches for common paths
-- Keep titles SHORT (2-5 words)
-- Make talking points actionable and natural-sounding
-- Focus on the most likely conversation paths and common objections`;
+- Each node SHOULD have a "sentiment": "positive", "neutral", or "negative"
+- Each node MUST have 1-3 "questions"
+- Create 2-4 children per node unless it is an explicit end state
+- Neutral branches must keep momentum with a follow-up question or next step
+- Keep titles SHORT (max ~40 chars)
+- Make talking points actionable and natural-sounding`;
+}
+
+export async function routeScenarioAction(
+    capture: string,
+    userApiKey?: string,
+    clientId?: string
+): Promise<ScenarioRouterResult> {
+    await enforceRateLimit(clientId);
+    const client = getOpenAIClient(userApiKey);
+
+    const systemPrompt = `You are a scenario router. Based on the raw capture, return JSON only with:
+{
+  "scenario_type": "salary_negotiation" | "neighbor_conflict" | "sales_call" | "partnership" | "interview" | "performance_feedback" | "personal_boundary" | "other",
+  "goal": "short goal statement",
+  "stakeholder": "who they are talking to",
+  "tone": "desired tone",
+  "constraints": ["constraint 1", "constraint 2"],
+  "success_criteria": ["success metric 1", "success metric 2"],
+  "taboo": ["do not say/do", "avoid topic"]
+}
+
+Use arrays (can be empty). Be concise, grounded, and avoid sales assumptions unless clearly present.`;
+
+    const response = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: capture }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.3,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) throw new Error('No response from AI');
+
+    const parsed = JSON.parse(content) as Partial<ScenarioRouterResult>;
+    return {
+        scenario_type: normalizeScenarioType(parsed.scenario_type),
+        goal: parsed.goal || '',
+        stakeholder: parsed.stakeholder || '',
+        tone: parsed.tone || '',
+        constraints: toStringArray((parsed as any).constraints),
+        success_criteria: toStringArray((parsed as any).success_criteria),
+        taboo: toStringArray((parsed as any).taboo),
+    };
+}
+
+// Generate a decision tree from a scenario description
+export async function generateTreeAction(
+    scenario: string,
+    userApiKey?: string,
+    clientId?: string,
+    router?: ScenarioRouterResult
+): Promise<TreeNode> {
+    await enforceRateLimit(clientId);
+    const client = getOpenAIClient(userApiKey);
+
+    const systemPrompt = buildTreeSystemPrompt(router);
 
     const response = await client.chat.completions.create({
         model: 'gpt-4o-mini',
@@ -115,8 +237,13 @@ IMPORTANT RULES:
     return addIdsToTree(parsed);
 }
 
-async function extractStructuredBuckets(capture: string, userApiKey?: string): Promise<StructuredBuckets> {
+async function extractStructuredBuckets(
+    capture: string,
+    userApiKey?: string,
+    router?: ScenarioRouterResult
+): Promise<StructuredBuckets> {
     const client = getOpenAIClient(userApiKey);
+    const scenarioContext = buildScenarioContext(router);
 
     const systemPrompt = `Extract structured fields from the raw capture.
 Return a JSON object with:
@@ -130,7 +257,10 @@ Optional keys when clearly present:
 - tone
 - title
 
-Keep each field concise and clear.`;
+Keep each field concise and clear.
+
+Scenario context:
+${JSON.stringify(scenarioContext)}`;
 
     const response = await client.chat.completions.create({
         model: 'gpt-4o-mini',
@@ -160,33 +290,12 @@ Keep each field concise and clear.`;
 
 async function generateTreeFromBuckets(
     buckets: StructuredBuckets,
-    userApiKey?: string
+    userApiKey?: string,
+    router?: ScenarioRouterResult
 ): Promise<TreeNode> {
     const client = getOpenAIClient(userApiKey);
 
-    const systemPrompt = `You are an expert sales strategist. Generate a decision tree for a call using the structured fields.
-
-Output a JSON object with this structure:
-{
-  "title": "Root greeting/opening",
-  "talkingPoints": ["Point 1 to say", "Point 2 to say"],
-  "questions": ["Discovery question 1?", "Discovery question 2?"],
-  "children": [
-    {
-      "title": "Possible response scenario",
-      "talkingPoints": ["What to say in this case"],
-      "questions": ["Follow-up discovery question?"],
-      "sentiment": "positive",
-      "children": [...]
-    }
-  ]
-}
-
-IMPORTANT:
-- Each node MUST include 1-3 discovery questions.
-- Use sentiments: "positive", "neutral", or "negative".
-- Keep titles short (2-5 words).
-- Use Goal/Stakeholder/Context/Decision frame to shape branches.`;
+    const systemPrompt = buildTreeSystemPrompt(router, buckets);
 
     const response = await client.chat.completions.create({
         model: 'gpt-4o-mini',
@@ -212,11 +321,12 @@ export async function structureProjectAction(
     capture: string,
     userApiKey?: string,
     clientId?: string
-): Promise<{ buckets: StructuredBuckets; tree: TreeNode }> {
+): Promise<{ buckets: StructuredBuckets; tree: TreeNode; router: ScenarioRouterResult }> {
     await enforceRateLimit(clientId);
-    const buckets = await extractStructuredBuckets(capture, userApiKey);
-    const tree = await generateTreeFromBuckets(buckets, userApiKey);
-    return { buckets, tree };
+    const router = await routeScenarioAction(capture, userApiKey, clientId);
+    const buckets = await extractStructuredBuckets(capture, userApiKey, router);
+    const tree = await generateTreeFromBuckets(buckets, userApiKey, router);
+    return { buckets, tree, router };
 }
 
 export async function regenerateBucketAction(
@@ -252,7 +362,7 @@ Return JSON: { "value": "..." }`;
 
     if (bucketKey === 'decisionFrame') {
         const nextBuckets = { ...buckets, decisionFrame: value };
-        const tree = await generateTreeFromBuckets(nextBuckets, userApiKey);
+        const tree = await generateTreeFromBuckets(nextBuckets, userApiKey, buckets.router);
         return { value, tree };
     }
 
@@ -310,43 +420,53 @@ Keep the same ID if present. Only modify what the user requested.`;
 export async function handleObjectionAction(
     objectionType: string,
     currentNode: TreeNode,
-    projectContext?: string,
+    projectGoal?: string,
+    router?: ScenarioRouterResult,
+    lastMoveLabel?: string,
     userApiKey?: string,
     clientId?: string
 ): Promise<TreeNode[]> {
     await enforceRateLimit(clientId);
     const client = getOpenAIClient(userApiKey);
+    const scenarioContext = buildScenarioContext(router);
 
-    const systemPrompt = `You are helping handle an unexpected objection during a business call.
-Generate 1 main response with 2 follow-up options as child nodes.
+    const systemPrompt = `You are helping handle an unexpected objection or moment during a call.
+Generate 1 main response with 2-4 follow-up options as child nodes.
+${SCENARIO_PANIC_TEMPLATES[scenarioContext.scenarioType]}
 
-Output as a JSON array with exactly 1 node that has 2 children:
-[
-  {
-    "title": "Response to objection (2-5 words)",
-    "talkingPoints": ["What to say to address this objection"],
-    "questions": ["Discovery question to understand their concern better?"],
-    "sentiment": "neutral",
-    "children": [
-      {
-        "title": "If they accept",
-        "talkingPoints": ["Follow-up point"],
-        "questions": ["Question to move forward?"],
-        "sentiment": "positive",
-        "children": []
-      },
-      {
-        "title": "If they push back",
-        "talkingPoints": ["Alternative approach"],
-        "questions": ["Question to dig deeper?"],
-        "sentiment": "negative",
-        "children": []
-      }
-    ]
-  }
-]
+Output as JSON object with exactly 1 node that has 2-4 children:
+{
+  "nodes": [
+    {
+      "title": "Response to objection (2-5 words)",
+      "talkingPoints": ["What to say to address this objection"],
+      "questions": ["Discovery question to understand their concern better?"],
+      "sentiment": "neutral",
+      "children": [
+        {
+          "title": "If they accept",
+          "talkingPoints": ["Follow-up point"],
+          "questions": ["Question to move forward?"],
+          "sentiment": "positive",
+          "children": []
+        },
+        {
+          "title": "If they push back",
+          "talkingPoints": ["Alternative approach"],
+          "questions": ["Question to dig deeper?"],
+          "sentiment": "negative",
+          "children": []
+        }
+      ]
+    }
+  ]
+}
 
-Be concise and actionable. Focus on professional, non-pushy responses. Always assign appropriate sentiment.`;
+IMPORTANT:
+- Be concise and actionable. Use short option titles (max ~40 chars).
+- Neutral branches must keep momentum and include a next step.
+- Avoid dead ends unless explicitly ending the call.
+- Always assign appropriate sentiment.`;
 
     const response = await client.chat.completions.create({
         model: 'gpt-4o-mini',
@@ -354,7 +474,21 @@ Be concise and actionable. Focus on professional, non-pushy responses. Always as
             { role: 'system', content: systemPrompt },
             {
                 role: 'user',
-                content: `Objection type: ${objectionType}\nCurrent position in call: ${currentNode.title}\n${projectContext ? `Call context: ${projectContext}` : ''}\n\nGenerate a response node with discovery questions.`
+                content: `Scenario type: ${scenarioContext.scenarioType}
+Goal: ${projectGoal || scenarioContext.goal}
+Stakeholder: ${scenarioContext.stakeholder}
+Tone: ${scenarioContext.tone}
+Constraints: ${scenarioContext.constraints.join('; ') || 'None'}
+Success criteria: ${scenarioContext.successCriteria.join('; ') || 'None'}
+Taboo: ${scenarioContext.taboo.join('; ') || 'None'}
+
+Last move selected: ${lastMoveLabel || 'N/A'}
+Current node title: ${currentNode.title}
+Say-this points: ${currentNode.talkingPoints.join(' | ') || 'None'}
+Questions: ${currentNode.questions.join(' | ') || 'None'}
+Selected panic option: ${objectionType}
+
+Generate a response node with discovery questions.`
             }
         ],
         response_format: { type: 'json_object' },
@@ -365,8 +499,125 @@ Be concise and actionable. Focus on professional, non-pushy responses. Always as
     if (!content) throw new Error('No response from AI');
 
     const parsed = JSON.parse(content);
-    const nodes = Array.isArray(parsed) ? parsed : [parsed];
+    const nodes = Array.isArray(parsed) ? parsed : parsed.nodes || [parsed];
     return nodes.map(addIdsToTree);
+}
+
+export async function getPanicOptionsAction(
+    currentNode: TreeNode,
+    projectGoal?: string,
+    router?: ScenarioRouterResult,
+    lastMoveLabel?: string,
+    userApiKey?: string,
+    clientId?: string
+): Promise<{ title: string; description?: string }[]> {
+    await enforceRateLimit(clientId);
+    const client = getOpenAIClient(userApiKey);
+    const scenarioContext = buildScenarioContext(router);
+
+    const systemPrompt = `Generate 3-5 panic options tailored to the scenario and current node.
+Each option should be a short, actionable title (max ~40 chars). Provide an optional 1-sentence description.
+${SCENARIO_PANIC_TEMPLATES[scenarioContext.scenarioType]}
+
+Return JSON object: { "options": [{ "title": "...", "description": "..." }] }`;
+
+    const response = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: systemPrompt },
+            {
+                role: 'user',
+                content: `Scenario type: ${scenarioContext.scenarioType}
+Goal: ${projectGoal || scenarioContext.goal}
+Stakeholder: ${scenarioContext.stakeholder}
+Tone: ${scenarioContext.tone}
+Constraints: ${scenarioContext.constraints.join('; ') || 'None'}
+Success criteria: ${scenarioContext.successCriteria.join('; ') || 'None'}
+Taboo: ${scenarioContext.taboo.join('; ') || 'None'}
+
+Last move selected: ${lastMoveLabel || 'N/A'}
+Current node title: ${currentNode.title}
+Say-this points: ${currentNode.talkingPoints.join(' | ') || 'None'}
+Questions: ${currentNode.questions.join(' | ') || 'None'}`
+            }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.6,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) throw new Error('No response from AI');
+
+    const parsed = JSON.parse(content);
+    const options = Array.isArray(parsed) ? parsed : parsed.options || [];
+    return (options as Array<{ title?: string; description?: string }>)
+        .map((opt) => ({
+            title: opt.title?.trim() || '',
+            description: opt.description?.trim() || undefined,
+        }))
+        .filter((opt) => opt.title);
+}
+
+export async function generateNextMovesAction(
+    currentNode: TreeNode,
+    projectGoal?: string,
+    router?: ScenarioRouterResult,
+    lastMoveLabel?: string,
+    userApiKey?: string,
+    clientId?: string
+): Promise<TreeNode[]> {
+    await enforceRateLimit(clientId);
+    const client = getOpenAIClient(userApiKey);
+    const scenarioContext = buildScenarioContext(router);
+
+    const systemPrompt = `Generate 2-4 next moves for the current node.
+Each move must be a short, actionable title (max ~40 chars) and include 1-2 "talkingPoints" and 1-2 "questions".
+Neutral branches must keep momentum and include a next step.
+${SCENARIO_TREE_TEMPLATES[scenarioContext.scenarioType]}
+
+Return a JSON object using this structure:
+{
+  "nodes": [
+    {
+      "title": "Short option title",
+      "talkingPoints": ["What to say"],
+      "questions": ["Question to ask?"],
+      "sentiment": "positive" | "neutral" | "negative",
+      "children": []
+    }
+  ]
+}`;
+
+    const response = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: systemPrompt },
+            {
+                role: 'user',
+                content: `Scenario type: ${scenarioContext.scenarioType}
+Goal: ${projectGoal || scenarioContext.goal}
+Stakeholder: ${scenarioContext.stakeholder}
+Tone: ${scenarioContext.tone}
+Constraints: ${scenarioContext.constraints.join('; ') || 'None'}
+Success criteria: ${scenarioContext.successCriteria.join('; ') || 'None'}
+Taboo: ${scenarioContext.taboo.join('; ') || 'None'}
+
+Last move selected: ${lastMoveLabel || 'N/A'}
+Current node title: ${currentNode.title}
+Say-this points: ${currentNode.talkingPoints.join(' | ') || 'None'}
+Questions: ${currentNode.questions.join(' | ') || 'None'}`
+            }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.7,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) throw new Error('No response from AI');
+
+    const parsed = JSON.parse(content);
+    const nodes = Array.isArray(parsed) ? parsed : parsed.nodes || [];
+    return (nodes as TreeNode[]).map(addIdsToTree);
 }
 
 // Generate call summary from path taken

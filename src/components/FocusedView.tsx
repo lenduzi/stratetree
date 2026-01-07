@@ -6,7 +6,7 @@ import { Project, TreeNode, CallSummary } from '@/lib/types';
 import { PanicButton } from './PanicButton';
 import { findNodeById, getPathToNode, addChildToNode } from '@/lib/hooks';
 import { saveProject } from '@/lib/db';
-import { generateCallSummaryAction } from '@/lib/actions';
+import { generateCallSummaryAction, generateNextMovesAction } from '@/lib/actions';
 import { v4 as uuidv4 } from 'uuid';
 import { getSentimentClass, getSentimentEmoji } from './NodeCard';
 import { getBrowserApiKey } from '@/lib/settings';
@@ -26,31 +26,22 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
     const [showFinishModal, setShowFinishModal] = useState(false);
     const [showMore, setShowMore] = useState(false);
     const [panicActiveId, setPanicActiveId] = useState<string | null>(null);
-    const [lastBranchNodeId, setLastBranchNodeId] = useState(project.rootNode.id);
+    const [lastMoveLabel, setLastMoveLabel] = useState<string | null>(null);
     const [showSaveNudge, setShowSaveNudge] = useState(false);
+    const [isGeneratingNextMoves, setIsGeneratingNextMoves] = useState(false);
+    const [nextMovesError, setNextMovesError] = useState<string | null>(null);
 
     const currentNode = findNodeById(project.rootNode, currentNodeId) || project.rootNode;
     const path = getPathToNode(project.rootNode, currentNodeId) || [project.rootNode];
     const talkingLines = currentNode.talkingPoints;
     const questionLines = currentNode.questions || [];
-    const lastBranchNode = findNodeById(project.rootNode, lastBranchNodeId);
-    const effectiveChildren = currentNode.children.length > 0
-        ? currentNode.children
-        : (lastBranchNode?.children || []);
-    const isUsingFallback = currentNode.children.length === 0 && effectiveChildren.length > 0;
-    const visibleOptions = effectiveChildren.slice(0, 4);
+    const visibleOptions = currentNode.children.slice(0, 4);
 
     useEffect(() => {
-        if (currentNode.children.length > 0) {
-            setLastBranchNodeId(currentNode.id);
-        }
-    }, [currentNode]);
-
-    useEffect(() => {
-        if (selectedIndex >= effectiveChildren.length) {
+        if (selectedIndex >= currentNode.children.length) {
             setSelectedIndex(0);
         }
-    }, [effectiveChildren.length, selectedIndex]);
+    }, [currentNode.children.length, selectedIndex]);
 
     // Keyboard navigation
     useEffect(() => {
@@ -61,8 +52,9 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
             // Number keys 1-9 to select option
             if (e.key >= '1' && e.key <= '9') {
                 const index = parseInt(e.key) - 1;
-                if (index < effectiveChildren.length) {
-                    const childId = effectiveChildren[index].id;
+                if (index < currentNode.children.length) {
+                    const childId = currentNode.children[index].id;
+                    setLastMoveLabel(currentNode.children[index].title);
                     setCurrentNodeId(childId);
                     setVisitedPath(prev => [...prev, childId]);
                     setSelectedIndex(0);
@@ -78,13 +70,14 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                 case 'ArrowDown':
                     e.preventDefault();
                     setSelectedIndex(prev => {
-                        if (effectiveChildren.length === 0) return 0;
-                        return Math.min(effectiveChildren.length - 1, prev + 1);
+                        if (currentNode.children.length === 0) return 0;
+                        return Math.min(currentNode.children.length - 1, prev + 1);
                     });
                     break;
                 case 'Enter':
-                    if (effectiveChildren[selectedIndex]) {
-                        const childId = effectiveChildren[selectedIndex].id;
+                    if (currentNode.children[selectedIndex]) {
+                        const childId = currentNode.children[selectedIndex].id;
+                        setLastMoveLabel(currentNode.children[selectedIndex].title);
                         setCurrentNodeId(childId);
                         setVisitedPath(prev => [...prev, childId]);
                         setSelectedIndex(0);
@@ -113,7 +106,7 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [currentNode, selectedIndex, path, showFullTree, showFinishModal, effectiveChildren]);
+    }, [currentNode, selectedIndex, path, showFullTree, showFinishModal]);
 
     // Handle panic button adding new nodes
     const handlePanicNodes = useCallback(async (newNodes: TreeNode[]) => {
@@ -134,6 +127,10 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
     }, [project, currentNodeId, onProjectUpdate]);
 
     const navigateToNode = (nodeId: string) => {
+        const node = findNodeById(project.rootNode, nodeId);
+        if (node?.title) {
+            setLastMoveLabel(node.title);
+        }
         setCurrentNodeId(nodeId);
         setVisitedPath(prev => [...prev, nodeId]);
         setSelectedIndex(0);
@@ -143,6 +140,35 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
         if (path.length > 1) {
             setCurrentNodeId(path[path.length - 2].id);
             setSelectedIndex(0);
+        }
+    };
+
+    const handleGenerateNextMoves = async () => {
+        setIsGeneratingNextMoves(true);
+        setNextMovesError(null);
+        try {
+            const nodes = await generateNextMovesAction(
+                currentNode,
+                project.structured?.goal || project.description,
+                project.structured?.router,
+                lastMoveLabel || undefined,
+                getBrowserApiKey() || undefined,
+                getClientId()
+            );
+            if (nodes.length === 0) {
+                throw new Error('No next moves generated');
+            }
+            let updatedRoot = project.rootNode;
+            nodes.forEach((node) => {
+                updatedRoot = addChildToNode(updatedRoot, currentNodeId, node);
+            });
+            const updatedProject = { ...project, rootNode: updatedRoot };
+            await saveProject(updatedProject);
+            onProjectUpdate?.(updatedProject);
+        } catch (e) {
+            setNextMovesError(e instanceof Error ? e.message : 'Failed to generate next moves');
+        } finally {
+            setIsGeneratingNextMoves(false);
         }
     };
 
@@ -167,7 +193,9 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                     <div className="call-cta-panic">
                         <PanicButton
                             currentNode={currentNode}
-                            projectContext={project.description}
+                            projectGoal={project.structured?.goal || project.description}
+                            router={project.structured?.router}
+                            lastMoveLabel={lastMoveLabel || undefined}
                             onNewNodes={handlePanicNodes}
                         />
                     </div>
@@ -247,6 +275,7 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                                         const updatedProject = { ...project, rootNode: updatedRoot };
                                         await saveProject(updatedProject);
                                         onProjectUpdate?.(updatedProject);
+                                        setLastMoveLabel(label);
                                         setCurrentNodeId(followupNode.id);
                                         setVisitedPath(prev => [...prev, followupNode.id]);
                                         setSelectedIndex(0);
@@ -262,12 +291,24 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
             </main>
 
             {/* Next moves dock */}
-            {effectiveChildren.length > 0 && (
-                <section className="options-dock">
-                    <div className="options-dock-title">Next moves</div>
-                    {isUsingFallback && (
-                        <div className="options-fallback-hint">Suggested next</div>
-                    )}
+            <section className="options-dock">
+                <div className="options-dock-title">Next moves</div>
+                {currentNode.children.length === 0 ? (
+                    <div className="options-empty">
+                        <button
+                            className="btn btn-primary"
+                            onClick={handleGenerateNextMoves}
+                            disabled={isGeneratingNextMoves}
+                        >
+                            {isGeneratingNextMoves ? 'Generating…' : 'Generate next moves'}
+                        </button>
+                        {nextMovesError && (
+                            <div className="text-muted" style={{ marginTop: 'var(--space-sm)', fontSize: '0.85rem' }}>
+                                {nextMovesError}
+                            </div>
+                        )}
+                    </div>
+                ) : (
                     <div className="options-scroll">
                         {visibleOptions.map((child, index) => (
                             <button
@@ -279,8 +320,8 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                             </button>
                         ))}
                     </div>
-                </section>
-            )}
+                )}
+            </section>
 
             {/* Floating controls */}
             <div className="floating-controls">

@@ -1,30 +1,25 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { TreeNode } from '@/lib/types';
-import { handleObjectionAction } from '@/lib/actions';
+import { ScenarioRouterResult, TreeNode } from '@/lib/types';
+import { getPanicOptionsAction, handleObjectionAction } from '@/lib/actions';
 import { getBrowserApiKey } from '@/lib/settings';
 import { getClientId } from '@/lib/client-id';
 
 interface PanicButtonProps {
     currentNode: TreeNode;
-    projectContext?: string;
+    projectGoal?: string;
+    router?: ScenarioRouterResult;
+    lastMoveLabel?: string;
     onNewNodes?: (nodes: TreeNode[]) => void;
 }
 
-const OBJECTION_TYPES = [
-    { id: 'pricing', label: '💰 Pricing / Budget', description: 'Too expensive, not in budget' },
-    { id: 'timing', label: '⏰ Timing', description: 'Not the right time, too busy' },
-    { id: 'competition', label: '🏆 Competition', description: 'Using another solution' },
-    { id: 'authority', label: '👤 Authority', description: 'Need to talk to someone else' },
-    { id: 'need', label: '🤔 Need', description: "Don't see the need / value" },
-    { id: 'other', label: '❓ Other', description: 'Something unexpected' },
-];
-
-export function PanicButton({ currentNode, projectContext, onNewNodes }: PanicButtonProps) {
+export function PanicButton({ currentNode, projectGoal, router, lastMoveLabel, onNewNodes }: PanicButtonProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
+    const [isLoadingOptions, setIsLoadingOptions] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [options, setOptions] = useState<Array<{ title: string; description?: string }>>([]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -37,15 +32,46 @@ export function PanicButton({ currentNode, projectContext, onNewNodes }: PanicBu
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [isOpen]);
 
-    const handleSelect = async (objectionType: string) => {
+    useEffect(() => {
+        setOptions([]);
+    }, [currentNode.id, projectGoal, router?.scenario_type]);
+
+    useEffect(() => {
+        if (!isOpen || options.length > 0 || isLoadingOptions) return;
+        const load = async () => {
+            setIsLoadingOptions(true);
+            setError(null);
+            try {
+                const browserKey = getBrowserApiKey();
+                const nextOptions = await getPanicOptionsAction(
+                    currentNode,
+                    projectGoal,
+                    router,
+                    lastMoveLabel,
+                    browserKey || undefined,
+                    getClientId()
+                );
+                setOptions(nextOptions);
+            } catch (e) {
+                setError(e instanceof Error ? e.message : 'Failed to load options');
+            } finally {
+                setIsLoadingOptions(false);
+            }
+        };
+        load();
+    }, [isOpen, options.length, isLoadingOptions, currentNode, projectGoal, router, lastMoveLabel]);
+
+    const handleSelect = async (optionTitle: string) => {
         setIsLoading(true);
         setError(null);
 
         try {
             const newNodes = await handleObjectionAction(
-                objectionType,
+                optionTitle,
                 currentNode,
-                projectContext,
+                projectGoal,
+                router,
+                lastMoveLabel,
                 getBrowserApiKey() || undefined,
                 getClientId()
             );
@@ -74,10 +100,10 @@ export function PanicButton({ currentNode, projectContext, onNewNodes }: PanicBu
                                     {error}
                                 </div>
                             )}
-                            {isLoading ? (
+                            {isLoading || isLoadingOptions ? (
                                 <div className="flex items-center justify-center gap-sm" style={{ padding: 'var(--space-md)' }}>
                                     <div className="spinner" style={{ width: 20, height: 20 }} />
-                                    <span>Generating response...</span>
+                                    <span>{isLoading ? 'Generating response...' : 'Loading options...'}</span>
                                 </div>
                             ) : (
                                 <>
@@ -88,20 +114,26 @@ export function PanicButton({ currentNode, projectContext, onNewNodes }: PanicBu
                                         textTransform: 'uppercase',
                                         letterSpacing: '0.05em'
                                     }}>
-                                        What objection?
+                                        What do they say?
                                     </div>
-                                    {OBJECTION_TYPES.map((type) => (
-                                        <button
-                                            key={type.id}
-                                            className="panic-option"
-                                            onClick={() => handleSelect(type.id)}
-                                        >
-                                            <div style={{ fontWeight: 500 }}>{type.label}</div>
-                                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                                                {type.description}
-                                            </div>
-                                        </button>
-                                    ))}
+                                    {options.length === 0 ? (
+                                        <div style={{ padding: 'var(--space-md)', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                                            No options yet. Try again.
+                                        </div>
+                                    ) : (
+                                        options.map((option) => (
+                                            <button
+                                                key={option.title}
+                                                className="panic-option"
+                                                onClick={() => handleSelect(option.title)}
+                                            >
+                                                <div style={{ fontWeight: 500 }}>{option.title}</div>
+                                                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                                    {option.description}
+                                                </div>
+                                            </button>
+                                        ))
+                                    )}
                                 </>
                             )}
                         </div>

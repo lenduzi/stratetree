@@ -11,6 +11,8 @@ import { ThemeToggle } from '@/components/ThemeProvider';
 import { getBrowserApiKey } from '@/lib/settings';
 import { getClientId } from '@/lib/client-id';
 
+type EditableBucketKey = Exclude<keyof StructuredBuckets, 'router' | 'rawCapture'>;
+
 export default function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
     const router = useRouter();
@@ -20,9 +22,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     const [error, setError] = useState<string | null>(null);
     const [isServerConfigured, setIsServerConfigured] = useState(false);
     const [showConfirmGen, setShowConfirmGen] = useState(false);
-    const [editingKey, setEditingKey] = useState<keyof StructuredBuckets | null>(null);
+    const [editingKey, setEditingKey] = useState<EditableBucketKey | null>(null);
     const [draftValue, setDraftValue] = useState('');
-    const [regeneratingKey, setRegeneratingKey] = useState<keyof StructuredBuckets | null>(null);
+    const [regeneratingKey, setRegeneratingKey] = useState<EditableBucketKey | null>(null);
     const [showOptional, setShowOptional] = useState(false);
     const [showRawCapture, setShowRawCapture] = useState(false);
 
@@ -68,7 +70,8 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             const newRoot = await generateTreeAction(
                 project.description || project.name,
                 getBrowserApiKey() || undefined,
-                getClientId()
+                getClientId(),
+                project.structured?.router
             );
             await handleTreeChange(newRoot);
         } catch (e) {
@@ -78,10 +81,11 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         }
     };
 
-    const startEdit = (key: keyof StructuredBuckets) => {
+    const startEdit = (key: EditableBucketKey) => {
         if (!project?.structured) return;
         setEditingKey(key);
-        setDraftValue(project.structured[key] || '');
+        const value = project.structured[key];
+        setDraftValue(typeof value === 'string' ? value : '');
     };
 
     const saveEdit = async () => {
@@ -97,7 +101,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         setEditingKey(null);
     };
 
-    const handleRegenerate = async (key: keyof StructuredBuckets) => {
+    const handleRegenerate = async (key: EditableBucketKey) => {
         if (!project?.structured?.rawCapture) return;
         setRegeneratingKey(key);
         setError(null);
@@ -156,13 +160,13 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
     const structured = project.structured;
     const isStructured = !!structured?.goal;
-    const requiredBuckets: { key: keyof StructuredBuckets; label: string }[] = [
+    const requiredBuckets: { key: EditableBucketKey; label: string }[] = [
         { key: 'goal', label: 'Goal' },
         { key: 'stakeholder', label: 'Who am I talking to?' },
         { key: 'context', label: 'What’s the situation?' },
         { key: 'decisionFrame', label: 'If they say X → I say Y' },
     ];
-    const optionalBuckets: { key: keyof StructuredBuckets; label: string }[] = [
+    const optionalBuckets: { key: EditableBucketKey; label: string }[] = [
         { key: 'redFlags', label: 'Red flags / likely objections' },
         { key: 'nonNegotiables', label: 'Non-negotiables' },
         { key: 'tone', label: 'Tone' },
