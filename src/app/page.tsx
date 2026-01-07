@@ -121,7 +121,7 @@ export default function HomePage() {
       <header className="header">
         <Link href="/" className="logo">
           <span className="logo-icon">🌳</span>
-          <span>Stratetree</span>
+          <span>YapMap</span>
         </Link>
         <div className="flex items-center gap-sm header-actions">
           <button className="btn btn-secondary btn-sm header-action header-import" onClick={handleImport}>
@@ -191,13 +191,13 @@ export default function HomePage() {
         ) : projects.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">🌱</div>
-            <div className="empty-state-title">No projects yet</div>
-            <p>Create your first strategy tree to get started.</p>
+            <div className="empty-state-title">Prepare your first call</div>
+            <p>Tap “New Project” to dictate a scenario and generate your tree.</p>
             <button
               className="btn btn-primary mt-lg project-cta"
               onClick={() => setShowNewModal(true)}
             >
-              + New Project
+              New Project
             </button>
           </div>
         ) : (

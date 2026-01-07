@@ -71,7 +71,7 @@ export default function SettingsPage() {
             <header className="header">
                 <Link href="/" className="logo">
                     <span className="logo-icon">🌳</span>
-                    <span>Stratetree</span>
+                    <span>YapMap</span>
                 </Link>
             </header>
 

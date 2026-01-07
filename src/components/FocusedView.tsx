@@ -155,7 +155,12 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
         <div className="focused-view call-mode">
             {/* Header with breadcrumb */}
             <header className="header call-topbar">
-                <div className="call-topbar-title">Call Mode</div>
+                <div className="call-topbar-title">
+                    <span className="call-title-primary">
+                        {project.name?.split('—')[0]?.trim() || project.name || 'Call'}
+                    </span>
+                    <span className="call-title-secondary">{currentNode.title}</span>
+                </div>
                 <div className="call-topbar-actions">
                     <div className="call-cta-panic">
                         <PanicButton
@@ -265,7 +270,7 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                         {visibleOptions.map((child, index) => (
                             <button
                                 key={child.id}
-                                className={`next-move-btn ${index === selectedIndex ? 'is-active' : ''}`}
+                                className={`next-move-btn ${child.sentiment ? `sentiment-${child.sentiment}` : ''} ${index === selectedIndex ? 'is-active' : ''}`}
                                 onClick={() => navigateToNode(child.id)}
                             >
                                 <span className="next-move-title">{child.title}</span>

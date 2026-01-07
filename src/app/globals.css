@@ -1,4 +1,4 @@
-/* Stratetree Design System */
+/* YapMap Design System */
 
 /* ===== THEME: DARK (Default) ===== */
 :root,
@@ -584,10 +584,27 @@ textarea {
 }
 
 .focused-view.call-mode .call-topbar-title {
-  font-size: 0.85rem;
-  letter-spacing: 0.3em;
-  text-transform: uppercase;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 55vw;
+}
+
+.focused-view.call-mode .call-title-primary {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.focused-view.call-mode .call-title-secondary {
+  font-size: 0.75rem;
   color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .focused-view.call-mode .call-topbar-actions {
@@ -908,6 +925,18 @@ textarea {
 .focused-view.call-mode .next-move-btn.is-active {
   border-color: color-mix(in srgb, var(--accent-primary) 55%, transparent);
   box-shadow: 0 0 14px rgba(99, 102, 241, 0.18);
+}
+
+.focused-view.call-mode .next-move-btn.sentiment-positive {
+  border-color: color-mix(in srgb, var(--success) 65%, transparent);
+}
+
+.focused-view.call-mode .next-move-btn.sentiment-neutral {
+  border-color: color-mix(in srgb, var(--warning) 65%, transparent);
+}
+
+.focused-view.call-mode .next-move-btn.sentiment-negative {
+  border-color: color-mix(in srgb, var(--danger) 65%, transparent);
 }
 
 .focused-view.call-mode .next-move-title {
@@ -1573,20 +1602,41 @@ textarea {
 
   .project-cta-sticky {
     position: fixed;
-    left: var(--space-md);
-    right: var(--space-md);
-    bottom: calc(var(--space-md) + env(safe-area-inset-bottom));
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(12px + env(safe-area-inset-bottom));
     z-index: 90;
     box-shadow: var(--shadow-lg);
+    max-width: 520px;
+    width: min(520px, calc(100% - clamp(32px, 8vw, 48px)));
+    padding-left: clamp(16px, 4vw, 24px);
+    padding-right: clamp(16px, 4vw, 24px);
+    box-sizing: border-box;
+  }
+
+  .project-cta-sticky.project-cta {
+    width: 100%;
   }
 
   .container {
-    padding-bottom: calc(var(--space-2xl) + 72px);
+    padding-bottom: calc(var(--space-2xl) + 120px + env(safe-area-inset-bottom));
   }
 
   .project-header {
     padding-top: calc(var(--space-md) + env(safe-area-inset-top));
     align-items: flex-start;
+  }
+
+  .focused-view.call-mode .call-topbar-title {
+    max-width: 60vw;
+  }
+
+  .focused-view.call-mode .call-title-primary {
+    font-size: 0.85rem;
+  }
+
+  .focused-view.call-mode .call-title-secondary {
+    font-size: 0.7rem;
   }
 
   .project-header-actions {
