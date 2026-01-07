@@ -63,7 +63,7 @@ export default function LoginPage() {
                     </form>
 
                     <div className="mt-lg text-center" style={{ fontSize: '0.8rem' }}>
-                        <Link href="/" className="text-muted">Continue as guest (local only)</Link>
+                        <Link href="/app" className="text-muted">Continue as guest (local only)</Link>
                     </div>
                 </div>
             </main>

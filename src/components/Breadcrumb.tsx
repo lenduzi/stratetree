@@ -12,7 +12,7 @@ interface BreadcrumbProps {
 export function Breadcrumb({ path, projectId, onNavigate }: BreadcrumbProps) {
     return (
         <nav className="breadcrumb">
-            <Link href={`/project/${projectId}`} className="breadcrumb-item">
+            <Link href={`/app/project/${projectId}`} className="breadcrumb-item">
                 Edit
             </Link>
             <span className="breadcrumb-separator">›</span>

@@ -53,7 +53,7 @@ export default function LiveModePage({ params }: { params: Promise<{ id: string 
                     <div className="empty-state">
                         <div className="empty-state-icon">❌</div>
                         <div className="empty-state-title">{error || 'Project not found'}</div>
-                        <Link href="/" className="btn btn-primary mt-lg">
+                        <Link href="/app" className="btn btn-primary mt-lg">
                             ← Back to Projects
                         </Link>
                     </div>

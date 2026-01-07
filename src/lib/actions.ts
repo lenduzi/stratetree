@@ -1,6 +1,7 @@
 'use server';
 
 import OpenAI from 'openai';
+import { headers } from 'next/headers';
 import { TreeNode, CallSummary, StructuredBuckets } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -24,8 +25,48 @@ function getOpenAIClient(userApiKey?: string): OpenAI {
     return new OpenAI({ apiKey });
 }
 
+const RATE_LIMIT_MAX = 20;
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+
+async function getRequestIp(): Promise<string | null> {
+    const headerList = await headers();
+    const forwarded = headerList.get('x-forwarded-for');
+    if (forwarded) return forwarded.split(',')[0]?.trim() || null;
+    return headerList.get('x-real-ip');
+}
+
+function consumeRateLimit(key: string, max: number, windowMs: number) {
+    const now = Date.now();
+    const record = rateLimitStore.get(key);
+    if (!record || record.resetAt < now) {
+        rateLimitStore.set(key, { count: 1, resetAt: now + windowMs });
+        return;
+    }
+    if (record.count >= max) {
+        throw new Error('Rate limit exceeded. Please try again later.');
+    }
+    record.count += 1;
+    rateLimitStore.set(key, record);
+}
+
+async function enforceRateLimit(clientId?: string) {
+    const ip = await getRequestIp();
+    if (ip) {
+        consumeRateLimit(`ip:${ip}`, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
+    }
+    if (clientId) {
+        consumeRateLimit(`client:${clientId}`, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
+    }
+}
+
 // Generate a decision tree from a scenario description
-export async function generateTreeAction(scenario: string, userApiKey?: string): Promise<TreeNode> {
+export async function generateTreeAction(
+    scenario: string,
+    userApiKey?: string,
+    clientId?: string
+): Promise<TreeNode> {
+    await enforceRateLimit(clientId);
     const client = getOpenAIClient(userApiKey);
 
     const systemPrompt = `You are an expert sales strategist helping prepare for business calls. 
@@ -169,8 +210,10 @@ IMPORTANT:
 
 export async function structureProjectAction(
     capture: string,
-    userApiKey?: string
+    userApiKey?: string,
+    clientId?: string
 ): Promise<{ buckets: StructuredBuckets; tree: TreeNode }> {
+    await enforceRateLimit(clientId);
     const buckets = await extractStructuredBuckets(capture, userApiKey);
     const tree = await generateTreeFromBuckets(buckets, userApiKey);
     return { buckets, tree };
@@ -180,8 +223,10 @@ export async function regenerateBucketAction(
     bucketKey: keyof StructuredBuckets,
     capture: string,
     buckets: StructuredBuckets,
-    userApiKey?: string
+    userApiKey?: string,
+    clientId?: string
 ): Promise<{ value: string; tree?: TreeNode }> {
+    await enforceRateLimit(clientId);
     const client = getOpenAIClient(userApiKey);
     const systemPrompt = `Regenerate only the requested bucket based on the raw capture and current structured fields.
 Return JSON: { "value": "..." }`;
@@ -219,8 +264,10 @@ export async function refineNodeAction(
     node: TreeNode,
     instruction: string,
     context?: string,
-    userApiKey?: string
+    userApiKey?: string,
+    clientId?: string
 ): Promise<TreeNode> {
+    await enforceRateLimit(clientId);
     const client = getOpenAIClient(userApiKey);
 
     const systemPrompt = `You are helping refine a decision tree node for a business call.
@@ -264,8 +311,10 @@ export async function handleObjectionAction(
     objectionType: string,
     currentNode: TreeNode,
     projectContext?: string,
-    userApiKey?: string
+    userApiKey?: string,
+    clientId?: string
 ): Promise<TreeNode[]> {
+    await enforceRateLimit(clientId);
     const client = getOpenAIClient(userApiKey);
 
     const systemPrompt = `You are helping handle an unexpected objection during a business call.
@@ -324,8 +373,10 @@ Be concise and actionable. Focus on professional, non-pushy responses. Always as
 export async function generateCallSummaryAction(
     pathTitles: string[],
     projectDescription: string,
-    userApiKey?: string
+    userApiKey?: string,
+    clientId?: string
 ): Promise<string> {
+    await enforceRateLimit(clientId);
     const client = getOpenAIClient(userApiKey);
 
     const systemPrompt = `You are helping summarize a business call based on the conversation path that was taken.
@@ -364,8 +415,10 @@ export async function isServerApiKeyConfigured(): Promise<boolean> {
 // Transcribe audio file using Whisper
 export async function transcribeAudioAction(
     formData: FormData,
-    userApiKey?: string
+    userApiKey?: string,
+    clientId?: string
 ): Promise<string> {
+    await enforceRateLimit(clientId);
     const file = formData.get('file') as File;
     if (!file) {
         throw new Error('No audio file provided');

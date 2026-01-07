@@ -9,6 +9,7 @@ import { generateTreeAction, isServerApiKeyConfigured, regenerateBucketAction } 
 import { TreeEditor } from '@/components/TreeEditor';
 import { ThemeToggle } from '@/components/ThemeProvider';
 import { getBrowserApiKey } from '@/lib/settings';
+import { getClientId } from '@/lib/client-id';
 
 export default function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
@@ -66,7 +67,8 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         try {
             const newRoot = await generateTreeAction(
                 project.description || project.name,
-                getBrowserApiKey() || undefined
+                getBrowserApiKey() || undefined,
+                getClientId()
             );
             await handleTreeChange(newRoot);
         } catch (e) {
@@ -105,7 +107,8 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                 key,
                 project.structured.rawCapture,
                 project.structured,
-                browserKey || undefined
+                browserKey || undefined,
+                getClientId()
             );
             const nextStructured = { ...project.structured, [key]: value };
             const nextProject = {
@@ -140,7 +143,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                     <div className="empty-state">
                         <div className="empty-state-icon">❌</div>
                         <div className="empty-state-title">{error}</div>
-                        <Link href="/" className="btn btn-primary mt-lg">
+                    <Link href="/app" className="btn btn-primary mt-lg">
                             ← Back to Projects
                         </Link>
                     </div>
@@ -170,7 +173,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         <div className="focused-view">
             <header className="header project-header">
                 <div className="flex items-center gap-md project-header-main">
-                    <Link href="/" className="btn btn-secondary btn-sm">
+                    <Link href="/app" className="btn btn-secondary btn-sm">
                         ← Back
                     </Link>
                     <div>
@@ -186,7 +189,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                     </span>
                     {isStructured ? (
                         <Link
-                            href={`/project/${project.id}/live`}
+                            href={`/app/project/${project.id}/live`}
                             className="btn btn-primary btn-lg project-start"
                         >
                             ▶ Start Call Mode
@@ -208,7 +211,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                                 )}
                             </button>
                             <Link
-                                href={`/project/${project.id}/live`}
+                                href={`/app/project/${project.id}/live`}
                                 className="btn btn-primary btn-lg project-start"
                             >
                                 ▶ Start Live Mode
@@ -237,7 +240,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                             ) : (
                                 <div>
                                     <strong>No API Key Configured.</strong> AI generation will not work.
-                                    Add your key in <Link href="/settings" style={{ color: 'var(--accent-secondary)', fontWeight: 600 }}>Settings</Link>.
+                                    Add your key in <Link href="/app/settings" style={{ color: 'var(--accent-secondary)', fontWeight: 600 }}>Settings</Link>.
                                 </div>
                             )}
                         </div>

@@ -10,6 +10,7 @@ import { generateCallSummaryAction } from '@/lib/actions';
 import { v4 as uuidv4 } from 'uuid';
 import { getSentimentClass, getSentimentEmoji } from './NodeCard';
 import { getBrowserApiKey } from '@/lib/settings';
+import { getClientId } from '@/lib/client-id';
 
 interface FocusedViewProps {
     project: Project;
@@ -26,6 +27,7 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
     const [showMore, setShowMore] = useState(false);
     const [panicActiveId, setPanicActiveId] = useState<string | null>(null);
     const [lastBranchNodeId, setLastBranchNodeId] = useState(project.rootNode.id);
+    const [showSaveNudge, setShowSaveNudge] = useState(false);
 
     const currentNode = findNodeById(project.rootNode, currentNodeId) || project.rootNode;
     const path = getPathToNode(project.rootNode, currentNodeId) || [project.rootNode];
@@ -328,9 +330,33 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                         };
                         await saveProject(updatedProject);
                         onProjectUpdate?.(updatedProject);
-                        router.push(`/project/${project.id}`);
+                        setShowFinishModal(false);
+                        setShowSaveNudge(true);
                     }}
                 />
+            )}
+
+            {showSaveNudge && (
+                <div className="modal-overlay" onClick={() => {
+                    setShowSaveNudge(false);
+                    router.push(`/app/project/${project.id}`);
+                }}>
+                    <div className="modal" onClick={(e) => e.stopPropagation()}>
+                        <h2 className="modal-title">Save this YapMap?</h2>
+                        <p className="text-muted">Save outcome + notes • Reuse later • Create more</p>
+                        <div className="modal-actions">
+                            <button className="btn btn-secondary" onClick={() => {
+                                setShowSaveNudge(false);
+                                router.push(`/app/project/${project.id}`);
+                            }}>
+                                Not now
+                            </button>
+                            <button className="btn btn-primary" onClick={() => router.push('/app/login')}>
+                                Sign up to save
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );
@@ -365,7 +391,8 @@ function FinishCallModal({
                 const summary = await generateCallSummaryAction(
                     pathTitles,
                     projectDescription,
-                    getBrowserApiKey() || undefined
+                    getBrowserApiKey() || undefined,
+                    getClientId()
                 );
                 setAiSummary(summary);
             } catch (e) {

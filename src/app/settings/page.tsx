@@ -69,7 +69,7 @@ export default function SettingsPage() {
     return (
         <div className="focused-view">
             <header className="header">
-                <Link href="/" className="logo">
+                <Link href="/app" className="logo">
                     <span className="logo-icon">🌳</span>
                     <span>YapMap</span>
                 </Link>
@@ -195,7 +195,7 @@ export default function SettingsPage() {
                     />
                 </div>
 
-                <Link href="/" className="btn btn-secondary mt-lg">
+                <Link href="/app" className="btn btn-secondary mt-lg">
                     ← Back to Projects
                 </Link>
             </main>

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { TreeNode } from '@/lib/types';
 import { handleObjectionAction } from '@/lib/actions';
 import { getBrowserApiKey } from '@/lib/settings';
+import { getClientId } from '@/lib/client-id';
 
 interface PanicButtonProps {
     currentNode: TreeNode;
@@ -45,7 +46,8 @@ export function PanicButton({ currentNode, projectContext, onNewNodes }: PanicBu
                 objectionType,
                 currentNode,
                 projectContext,
-                getBrowserApiKey() || undefined
+                getBrowserApiKey() || undefined,
+                getClientId()
             );
             onNewNodes?.(newNodes);
             setIsOpen(false);

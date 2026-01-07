@@ -9,6 +9,13 @@ export async function middleware(request: NextRequest) {
         },
     })
 
+    const pathname = request.nextUrl.pathname;
+    if (pathname.startsWith('/app/')) {
+        const url = request.nextUrl.clone();
+        url.pathname = pathname.replace(/^\/app/, '') || '/';
+        return NextResponse.rewrite(url);
+    }
+
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -59,15 +66,7 @@ export async function middleware(request: NextRequest) {
 
     // Debug header to help diagnose auth state in production
     if (user) {
-        response.headers.set('X-Stratetree-Auth', user.id)
-    }
-
-    // Protect project routes - redirect to login if no user
-    if (!user && (request.nextUrl.pathname.startsWith('/project') || request.nextUrl.pathname === '/')) {
-        // Force login for project routes
-        if (request.nextUrl.pathname.startsWith('/project')) {
-            return NextResponse.redirect(new URL('/login', request.url))
-        }
+        response.headers.set('X-YapMap-Auth', user.id)
     }
 
     return response
