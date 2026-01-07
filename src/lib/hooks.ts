@@ -103,7 +103,7 @@ export function updateNodeInTree(root: TreeNode, nodeId: string, updater: (node:
     }
     return {
         ...root,
-        children: root.children.map(child => updateNodeInTree(child, nodeId, updater)),
+        children: (Array.isArray(root.children) ? root.children : []).map(child => updateNodeInTree(child, nodeId, updater)),
     };
 }
 

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Project } from '@/lib/types';
 import { getProject, saveProject } from '@/lib/db';
 import { FocusedView } from '@/components/FocusedView';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 export default function LiveModePage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
@@ -63,9 +64,11 @@ export default function LiveModePage({ params }: { params: Promise<{ id: string 
     }
 
     return (
-        <FocusedView
-            project={project}
-            onProjectUpdate={handleProjectUpdate}
-        />
+        <ErrorBoundary title="Call view failed to render" onRetry={loadProject}>
+            <FocusedView
+                project={project}
+                onProjectUpdate={handleProjectUpdate}
+            />
+        </ErrorBoundary>
     );
 }

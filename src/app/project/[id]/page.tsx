@@ -7,11 +7,12 @@ import { Project, StructuredBuckets, TreeNode } from '@/lib/types';
 import { getProject, saveProject } from '@/lib/db';
 import { generateTreeAction, isServerApiKeyConfigured, regenerateBucketAction } from '@/lib/actions';
 import { TreeEditor } from '@/components/TreeEditor';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ThemeToggle } from '@/components/ThemeProvider';
 import { getBrowserApiKey } from '@/lib/settings';
 import { getClientId } from '@/lib/client-id';
 
-type EditableBucketKey = Exclude<keyof StructuredBuckets, 'router' | 'rawCapture'>;
+type EditableBucketKey = Exclude<keyof StructuredBuckets, 'router' | 'rawCapture' | 'objectionHandlers'>;
 
 export default function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
@@ -66,6 +67,25 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         setGenerating(true);
         setError(null);
 
+        try {
+            const newRoot = await generateTreeAction(
+                project.description || project.name,
+                getBrowserApiKey() || undefined,
+                getClientId(),
+                project.structured?.router
+            );
+            await handleTreeChange(newRoot);
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Failed to generate tree');
+        } finally {
+            setGenerating(false);
+        }
+    };
+
+    const retryGeneration = async () => {
+        if (!project) return;
+        setGenerating(true);
+        setError(null);
         try {
             const newRoot = await generateTreeAction(
                 project.description || project.name,
@@ -413,10 +433,12 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                                     Click Edit to modify nodes, + Child to add branches
                                 </span>
                             </div>
-                            <TreeEditor
-                                rootNode={project.rootNode}
-                                onChange={handleTreeChange}
-                            />
+                            <ErrorBoundary title="Tree failed to render" onRetry={retryGeneration}>
+                                <TreeEditor
+                                    rootNode={project.rootNode}
+                                    onChange={handleTreeChange}
+                                />
+                            </ErrorBoundary>
                         </div>
                     </>
                 )}

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { Project } from '@/lib/types';
 import { saveProject } from '@/lib/db';
-import { extractStructuredBucketsAction, generateTreeFromBucketsAction, routeScenarioAction, transcribeAudioAction } from '@/lib/actions';
+import { extractStructuredBucketsAction, generateObjectionHandlersAction, generateProjectBundleAction, generateTreeFromBucketsAction, routeScenarioAction, transcribeAudioAction } from '@/lib/actions';
 import { getBrowserApiKey } from '@/lib/settings';
 import { getClientId } from '@/lib/client-id';
 import Link from 'next/link';
@@ -186,6 +186,7 @@ export function CaptureFlow({
   const startStructuring = async (raw: string) => {
     const trimmed = raw.trim();
     if (!trimmed) return;
+    const totalStart = Date.now();
 
     setLimitReached(false);
     if (isGuest && !canCreateGuestProject()) {
@@ -224,7 +225,9 @@ export function CaptureFlow({
       updatedAt: Date.now(),
     };
 
+    const dbStart = Date.now();
     await saveProject(draft);
+    console.log('[capture] db_ms', Date.now() - dbStart);
     await advanceStage();
     if (isGuest) {
       incrementGuestCount();
@@ -233,21 +236,31 @@ export function CaptureFlow({
     try {
       const browserKey = getBrowserApiKey();
       const clientId = getClientId();
-      const router = await routeScenarioAction(trimmed, browserKey || undefined, clientId);
+      let bundles = null;
+      try {
+        bundles = await generateProjectBundleAction(trimmed, browserKey || undefined, clientId);
+      } catch (e) {
+        console.warn('[capture] bundle failed, falling back', e);
+      }
+
+      const router = bundles?.router || await routeScenarioAction(trimmed, browserKey || undefined, clientId);
       await advanceStage();
-      const buckets = await extractStructuredBucketsAction(trimmed, router, browserKey || undefined, clientId);
+      const buckets = bundles?.buckets || await extractStructuredBucketsAction(trimmed, router, browserKey || undefined, clientId);
       await advanceStage();
-      const tree = await generateTreeFromBucketsAction(buckets, router, browserKey || undefined, clientId);
+      const tree = bundles?.tree || await generateTreeFromBucketsAction(buckets, router, browserKey || undefined, clientId);
       await advanceStage();
+      const objectionHandlers = bundles?.objectionHandlers || await generateObjectionHandlersAction(router, buckets, browserKey || undefined, clientId);
       const title = (buckets.title || `${buckets.stakeholder} — ${buckets.goal}`).trim() || 'New Project';
       const updated: Project = {
         ...draft,
         name: title,
         description: buckets.context || trimmed,
         rootNode: tree,
-        structured: { ...buckets, rawCapture: trimmed, title, router },
+        structured: { ...buckets, rawCapture: trimmed, title, router, objectionHandlers },
       };
+      const dbEndStart = Date.now();
       await saveProject(updated);
+      console.log('[capture] db_ms', Date.now() - dbEndStart);
       finishProgress();
       onComplete(id);
     } catch (e) {
@@ -256,6 +269,7 @@ export function CaptureFlow({
       resetProgress();
     } finally {
       setIsProcessing(false);
+      console.log('[capture] total_ms', Date.now() - totalStart);
     }
   };
 

@@ -2,11 +2,11 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Project, TreeNode, CallSummary, NodeSentiment } from '@/lib/types';
+import { Project, TreeNode, CallSummary, NodeSentiment, ScenarioCategory } from '@/lib/types';
 import { PanicButton } from './PanicButton';
 import { findNodeById, getPathToNode, addChildToNode, updateNodeInTree } from '@/lib/hooks';
 import { saveProject } from '@/lib/db';
-import { generateAskNextAction, generateCallSummaryAction, generateNextMovesAction, getPanicOptionsAction, handleObjectionAction } from '@/lib/actions';
+import { generateAskNextAction, generateCallSummaryAction, generateNextMovesAction, generateObjectionStep } from '@/lib/actions';
 import { v4 as uuidv4 } from 'uuid';
 import { getSentimentClass, getSentimentEmoji } from './NodeCard';
 import { getBrowserApiKey } from '@/lib/settings';
@@ -20,47 +20,39 @@ interface FocusedViewProps {
 export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
     const router = useRouter();
     const [currentNodeId, setCurrentNodeId] = useState(project.rootNode.id);
-    const [selectedIndex, setSelectedIndex] = useState(0);
     const [showFullTree, setShowFullTree] = useState(false);
     const [visitedPath, setVisitedPath] = useState<string[]>([project.rootNode.id]);
     const [showFinishModal, setShowFinishModal] = useState(false);
     const [showMore, setShowMore] = useState(false);
-    const [panicActiveId, setPanicActiveId] = useState<string | null>(null);
     const [lastMoveLabel, setLastMoveLabel] = useState<string | null>(null);
     const [lastSelectedSentiment, setLastSelectedSentiment] = useState<TreeNode['sentiment'] | null>(null);
     const [showSaveNudge, setShowSaveNudge] = useState(false);
     const [isGeneratingNextMoves, setIsGeneratingNextMoves] = useState(false);
-    const [showPanicTip, setShowPanicTip] = useState(false);
-    const [showPanicToast, setShowPanicToast] = useState(false);
+    const [showPanicHelp, setShowPanicHelp] = useState(false);
     const [askNextGenerating, setAskNextGenerating] = useState(false);
     const [askNextError, setAskNextError] = useState<string | null>(null);
-    const [panicPicks, setPanicPicks] = useState<Array<{ title: string }>>([]);
-    const [panicPickLoading, setPanicPickLoading] = useState(false);
     const [idleNudge, setIdleNudge] = useState(false);
     const lastGeneratedAtRef = useRef<Record<string, number>>({});
     const lastMovesGeneratedAtRef = useRef<Record<string, number>>({});
+    const [negativePulse, setNegativePulse] = useState(false);
+    const [objectionStep, setObjectionStep] = useState<{ title: string; sayThisNow: string[]; askNext: string[] } | null>(null);
+    const [objectionLoading, setObjectionLoading] = useState(false);
+    const [objectionError, setObjectionError] = useState<string | null>(null);
 
     const currentNode = findNodeById(project.rootNode, currentNodeId) || project.rootNode;
+    const childList = Array.isArray(currentNode.children) ? currentNode.children : [];
     const path = getPathToNode(project.rootNode, currentNodeId) || [project.rootNode];
-    const talkingLines = currentNode.talkingPoints;
-    const questionLines = currentNode.questions || [];
-    const visibleOptions = currentNode.children.slice(0, 4);
+    const talkingLines = objectionStep?.sayThisNow.length ? objectionStep.sayThisNow : currentNode.talkingPoints;
+    const questionLines = objectionStep?.askNext.length ? objectionStep.askNext : (currentNode.questions || []);
     const isLowAskNext = questionLines.length < 2;
     const sentimentNudge = lastSelectedSentiment === 'neutral' || lastSelectedSentiment === 'negative';
     const nudgeActive = idleNudge || isLowAskNext || sentimentNudge;
     const sentimentChildren = {
-        positive: currentNode.children.find((child) => child.sentiment === 'positive') || null,
-        neutral: currentNode.children.find((child) => child.sentiment === 'neutral') || null,
-        negative: currentNode.children.find((child) => child.sentiment === 'negative') || null,
+        positive: childList.find((child) => child.sentiment === 'positive') || null,
+        neutral: childList.find((child) => child.sentiment === 'neutral') || null,
+        negative: childList.find((child) => child.sentiment === 'negative') || null,
     };
     const nextMovesNeeded = !sentimentChildren.positive || !sentimentChildren.neutral || !sentimentChildren.negative;
-    const nextMovesSkeletonCount = Math.max(0, 3 - currentNode.children.length);
-
-    useEffect(() => {
-        if (selectedIndex >= currentNode.children.length) {
-            setSelectedIndex(0);
-        }
-    }, [currentNode.children.length, selectedIndex]);
 
     useEffect(() => {
         setIdleNudge(false);
@@ -68,64 +60,30 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
         return () => window.clearTimeout(timer);
     }, [currentNodeId]);
 
-    useEffect(() => {
-        if (typeof window === 'undefined') return;
-        if (localStorage.getItem('yapmap-panic-tip-shown')) return;
-        setShowPanicToast(true);
-        localStorage.setItem('yapmap-panic-tip-shown', 'true');
-        const timer = window.setTimeout(() => setShowPanicToast(false), 3200);
-        return () => window.clearTimeout(timer);
-    }, []);
-
     // Keyboard navigation
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             // Don't handle keys when modal is open
             if (showFinishModal) return;
 
-            // Number keys 1-9 to select option
-            if (e.key >= '1' && e.key <= '9') {
-                const index = parseInt(e.key) - 1;
-                    if (index < currentNode.children.length) {
-                        const child = currentNode.children[index];
-                        const childId = child.id;
-                        setLastMoveLabel(currentNode.children[index].title);
-                        setLastSelectedSentiment(child.sentiment || null);
-                        setCurrentNodeId(childId);
-                        setVisitedPath(prev => [...prev, childId]);
-                        setSelectedIndex(0);
-                    }
+            if (e.key === '1') {
+                handleSelectResponse('positive');
+                return;
+            }
+            if (e.key === '2') {
+                handleSelectResponse('neutral');
+                return;
+            }
+            if (e.key === '3') {
+                handleSelectResponse('negative');
                 return;
             }
 
             switch (e.key) {
-                case 'ArrowUp':
-                    e.preventDefault();
-                    setSelectedIndex(prev => Math.max(0, prev - 1));
-                    break;
-                case 'ArrowDown':
-                    e.preventDefault();
-                    setSelectedIndex(prev => {
-                        if (currentNode.children.length === 0) return 0;
-                        return Math.min(currentNode.children.length - 1, prev + 1);
-                    });
-                    break;
-                case 'Enter':
-                    if (currentNode.children[selectedIndex]) {
-                        const child = currentNode.children[selectedIndex];
-                        const childId = child.id;
-                        setLastMoveLabel(currentNode.children[selectedIndex].title);
-                        setLastSelectedSentiment(child.sentiment || null);
-                        setCurrentNodeId(childId);
-                        setVisitedPath(prev => [...prev, childId]);
-                        setSelectedIndex(0);
-                    }
-                    break;
                 case 'Backspace':
                     e.preventDefault();
                     if (path.length > 1) {
                         setCurrentNodeId(path[path.length - 2].id);
-                        setSelectedIndex(0);
                     }
                     break;
                 case 'f':
@@ -144,27 +102,10 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [currentNode, selectedIndex, path, showFullTree, showFinishModal]);
-
-    // Handle panic button adding new nodes
-    const handlePanicNodes = useCallback(async (newNodes: TreeNode[]) => {
-        let updatedRoot = project.rootNode;
-        for (const node of newNodes) {
-            updatedRoot = addChildToNode(updatedRoot, currentNodeId, node);
-        }
-
-        const updatedProject = { ...project, rootNode: updatedRoot };
-        await saveProject(updatedProject);
-        onProjectUpdate?.(updatedProject);
-        if (newNodes[0]) {
-            setCurrentNodeId(newNodes[0].id);
-            setVisitedPath(prev => [...prev, newNodes[0].id]);
-            setSelectedIndex(0);
-            setPanicActiveId(newNodes[0].id);
-        }
-    }, [project, currentNodeId, onProjectUpdate]);
+    }, [currentNode, path, showFullTree, showFinishModal]);
 
     const navigateToNode = (nodeId: string) => {
+        setObjectionStep(null);
         const node = findNodeById(project.rootNode, nodeId);
         if (node?.title) {
             setLastMoveLabel(node.title);
@@ -172,13 +113,11 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
         setLastSelectedSentiment(node?.sentiment || null);
         setCurrentNodeId(nodeId);
         setVisitedPath(prev => [...prev, nodeId]);
-        setSelectedIndex(0);
     };
 
     const goBack = () => {
         if (path.length > 1) {
             setCurrentNodeId(path[path.length - 2].id);
-            setSelectedIndex(0);
         }
     };
 
@@ -203,7 +142,7 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
             if (nodes.length < 2) {
                 nodes = await generateNextMovesAction(...baseArgs, true);
             }
-            if (nodes.length < 2) {
+            if (nodes.length < 3) {
                 nodes = [
                     {
                         id: uuidv4(),
@@ -257,6 +196,14 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                     sentiment: 'neutral',
                     children: [],
                 },
+                {
+                    id: uuidv4(),
+                    title: 'Propose next step',
+                    talkingPoints: ['Here’s a simple next step we can take.'],
+                    questions: ['Would that work for you?'],
+                    sentiment: 'positive',
+                    children: [],
+                },
             ] satisfies TreeNode[];
             let updatedRoot = project.rootNode;
             fallbackNodes.forEach((node) => {
@@ -296,12 +243,50 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
     }, [pendingSentiment, sentimentChildren, navigateToNode]);
 
     const handleSelectResponse = (sentiment: NodeSentiment) => {
+        setObjectionStep(null);
         const child = sentimentChildren[sentiment];
         if (child) {
             navigateToNode(child.id);
         } else {
             setPendingSentiment(sentiment);
             handleGenerateNextMoves();
+        }
+    };
+
+    const objectionLabels = getObjectionLabels(project.structured?.router?.scenario_category);
+
+    const handlePanicSelect = async (label: string) => {
+        const isOther = label === 'Other...';
+        const selectedLabel = isOther ? window.prompt('What are they resisting?') : label;
+        if (!selectedLabel) return;
+
+        setObjectionError(null);
+        setObjectionLoading(true);
+        const t0 = Date.now();
+        try {
+            const contextSummary = [
+                project.structured?.goal,
+                project.structured?.stakeholder,
+                project.structured?.context,
+                project.structured?.decisionFrame,
+            ].filter(Boolean).join(' | ');
+            const step = await generateObjectionStep(
+                selectedLabel,
+                contextSummary || project.description,
+                getBrowserApiKey() || undefined,
+                getClientId()
+            );
+            console.log('[panic] objection_ms', Date.now() - t0);
+            setObjectionStep({
+                title: step.title,
+                sayThisNow: step.sayThisNow || [],
+                askNext: step.askNext || [],
+            });
+        } catch (e) {
+            console.warn('Failed to generate objection step', e);
+            setObjectionError('Couldn’t generate objection help — try again');
+        } finally {
+            setObjectionLoading(false);
         }
     };
 
@@ -355,51 +340,6 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
         }
     }, [handleAskNextAutogen, questionLines.length]);
 
-    useEffect(() => {
-        let active = true;
-        const loadPanicPicks = async () => {
-            setPanicPickLoading(true);
-            try {
-                const picks = await getPanicOptionsAction(
-                    currentNode,
-                    project.structured?.goal || project.description,
-                    project.structured?.router,
-                    lastMoveLabel || undefined,
-                    getBrowserApiKey() || undefined,
-                    getClientId()
-                );
-                if (active) {
-                    setPanicPicks(picks.slice(0, 2));
-                }
-            } catch {
-                if (active) setPanicPicks([]);
-            } finally {
-                if (active) setPanicPickLoading(false);
-            }
-        };
-        loadPanicPicks();
-        return () => {
-            active = false;
-        };
-    }, [currentNodeId, project, lastMoveLabel]);
-
-    const handlePanicPick = async (title: string) => {
-        try {
-            const nodes = await handleObjectionAction(
-                title,
-                currentNode,
-                project.structured?.goal || project.description,
-                project.structured?.router,
-                lastMoveLabel || undefined,
-                getBrowserApiKey() || undefined,
-                getClientId()
-            );
-            await handlePanicNodes(nodes);
-        } catch (e) {
-            console.warn('Failed to use panic pick', e);
-        }
-    };
-
     // Get visited path as titles
     const getVisitedTitles = () => {
         return visitedPath
@@ -418,31 +358,24 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                     <span className="call-title-secondary">{currentNode.title}</span>
                 </div>
                 <div className="call-topbar-actions">
-                    <div
-                        className="call-cta-panic"
-                        onMouseEnter={() => setShowPanicTip(true)}
-                        onMouseLeave={() => setShowPanicTip(false)}
-                    >
+                    {path.length > 1 && (
+                        <button className="btn btn-secondary btn-sm call-back-btn" onClick={goBack}>
+                            ← Back
+                        </button>
+                    )}
+                    <div className="call-cta-panic">
                         <PanicButton
-                            currentNode={currentNode}
-                            projectGoal={project.structured?.goal || project.description}
-                            router={project.structured?.router}
-                            lastMoveLabel={lastMoveLabel || undefined}
                             nudgeActive={nudgeActive}
-                            onNewNodes={handlePanicNodes}
+                            objections={objectionLabels}
+                            onSelect={handlePanicSelect}
                         />
                         <button
                             className="panic-info-btn"
-                            onClick={() => setShowPanicTip((prev) => !prev)}
+                            onClick={() => setShowPanicHelp(true)}
                             aria-label="Panic help"
                         >
                             ?
                         </button>
-                        {showPanicTip && (
-                            <div className="panic-tooltip" role="tooltip">
-                                Stuck? Tap Panic for a stronger line.
-                            </div>
-                        )}
                     </div>
                     <button
                         className="btn btn-primary btn-sm call-cta-finish"
@@ -478,7 +411,7 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                     </div>
                     <h1 className="current-node-title">
                         {currentNode.sentiment && <span style={{ marginRight: 8 }}>{getSentimentEmoji(currentNode.sentiment)}</span>}
-                        {currentNode.title}
+                        {objectionStep?.title || currentNode.title}
                     </h1>
                     {talkingLines.length > 0 && (
                         <div className={`say-now-brief ${showMore ? 'expanded' : ''}`}>
@@ -489,21 +422,17 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                             ))}
                         </div>
                     )}
-                    <div className="response-toggle">
-                        <span className="response-label">Their response:</span>
-                        <div className="response-buttons">
-                            {(['positive', 'neutral', 'negative'] as NodeSentiment[]).map((sentiment) => (
-                                <button
-                                    key={sentiment}
-                                    className={`response-btn response-${sentiment}${pendingSentiment === sentiment ? ' is-loading' : ''}`}
-                                    onClick={() => handleSelectResponse(sentiment)}
-                                    disabled={isGeneratingNextMoves && pendingSentiment === sentiment}
-                                >
-                                    {sentiment === 'positive' ? 'Positive' : sentiment === 'neutral' ? 'Neutral' : 'Negative'}
-                                </button>
-                            ))}
+                    {objectionLoading && (
+                        <div className="objection-loading">
+                            <div className="spinner" style={{ width: 18, height: 18 }} />
+                            <span>Thinking…</span>
                         </div>
-                    </div>
+                    )}
+                    {objectionError && (
+                        <div className="objection-error">
+                            {objectionError}
+                        </div>
+                    )}
                     <div className="ask-next">
                         <div className="ask-next-label">Ask next</div>
                         <div className="ask-next-list">
@@ -527,89 +456,27 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                                 Generate options
                             </button>
                         )}
-                        {panicPicks.length > 0 && (
-                            <div className="panic-picks">
-                                <span className="panic-picks-label">Panic picks</span>
-                                <div className="panic-picks-list">
-                                    {panicPicks.map((pick) => (
-                                        <button
-                                            key={pick.title}
-                                            className="panic-pill"
-                                            onClick={() => handlePanicPick(pick.title)}
-                                        >
-                                            {pick.title}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                        {panicPickLoading && panicPicks.length === 0 && (
-                            <div className="panic-picks-loading">Loading panic picks…</div>
-                        )}
                     </div>
-                    {panicActiveId === currentNodeId && (
-                        <div className="panic-followups">
-                            {['Clarify', 'Reframe', 'Next step'].map((label) => (
-                                <button
-                                    key={label}
-                                    className="panic-followup-btn"
-                                    onClick={async () => {
-                                        const followupNode: TreeNode = {
-                                            id: uuidv4(),
-                                            title: label,
-                                            talkingPoints: [],
-                                            questions: [],
-                                            sentiment: 'neutral',
-                                            children: [],
-                                        };
-                                        const updatedRoot = addChildToNode(project.rootNode, currentNodeId, followupNode);
-                                        const updatedProject = { ...project, rootNode: updatedRoot };
-                                        await saveProject(updatedProject);
-                                        onProjectUpdate?.(updatedProject);
-                                        setLastMoveLabel(label);
-                                        setCurrentNodeId(followupNode.id);
-                                        setVisitedPath(prev => [...prev, followupNode.id]);
-                                        setSelectedIndex(0);
-                                    }}
-                                >
-                                    {label}
-                                </button>
-                            ))}
-                        </div>
-                    )}
                 </div>
 
             </main>
 
             {/* Next moves dock */}
             <section className="options-dock">
-                <div className="options-dock-title">Next moves</div>
-                <div className="options-scroll">
-                    {visibleOptions.map((child, index) => (
+                <div className="options-dock-title">THEIR RESPONSE</div>
+                <div className="response-chips">
+                    {(['positive', 'neutral', 'negative'] as NodeSentiment[]).map((sentiment) => (
                         <button
-                            key={child.id}
-                            className={`next-move-btn ${child.sentiment ? `sentiment-${child.sentiment}` : ''} ${index === selectedIndex ? 'is-active' : ''}`}
-                            onClick={() => navigateToNode(child.id)}
+                            key={sentiment}
+                            className={`response-chip response-${sentiment}${pendingSentiment === sentiment ? ' is-loading' : ''}${negativePulse && sentiment === 'negative' ? ' pulse' : ''}`}
+                            onClick={() => handleSelectResponse(sentiment)}
+                            disabled={isGeneratingNextMoves && pendingSentiment === sentiment}
                         >
-                            <span className="next-move-title">{child.title}</span>
+                            {sentiment === 'positive' ? 'Positive' : sentiment === 'neutral' ? 'Neutral' : 'Negative'}
                         </button>
                     ))}
-                    {isGeneratingNextMoves && nextMovesSkeletonCount > 0 && (
-                        Array.from({ length: nextMovesSkeletonCount }).map((_, i) => (
-                            <div key={`skeleton-${i}`} className="next-move-skeleton" />
-                        ))
-                    )}
                 </div>
             </section>
-
-            {/* Floating controls */}
-            <div className="floating-controls">
-                {path.length > 1 && (
-                    <button className="btn btn-secondary call-back-btn" onClick={goBack}>
-                        ← Back <span className="kbd" style={{ marginLeft: 4 }}>⌫</span>
-                    </button>
-                )}
-            </div>
 
             {/* Full tree modal */}
             {showFullTree && (
@@ -678,13 +545,93 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                     </div>
                 </div>
             )}
-            {showPanicToast && (
-                <div className="panic-toast">
-                    Stuck? Tap Panic for a stronger line.
+            {showPanicHelp && (
+                <div className="modal-overlay" onClick={() => setShowPanicHelp(false)}>
+                    <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
+                        <h2 className="modal-title">Using Panic</h2>
+                        <p className="text-muted">Pick why they’re resisting. We’ll generate objection-specific talking points. Then use Positive/Neutral/Negative to continue.</p>
+                        <div className="modal-actions">
+                            <button className="btn btn-secondary" onClick={() => setShowPanicHelp(false)}>
+                                Close
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>
     );
+}
+
+function getObjectionLabels(category?: ScenarioCategory) {
+    switch (category) {
+        case 'sales_partnership':
+            return [
+                'Budget',
+                'Timing / not a priority',
+                'Need approval',
+                'Already using competitor',
+                "Don't see value / unclear ROI",
+                'Too much effort to implement',
+                'Trust / credibility',
+                'Send info (stall)',
+                'Other...',
+            ];
+        case 'salary_negotiation':
+            return [
+                'Budget / comp freeze',
+                'Not the right time',
+                'Performance expectations not met',
+                'Need more scope/impact',
+                'Internal equity / bands',
+                "Let's revisit later",
+                'Non-monetary benefits instead',
+                'Headcount / org constraints',
+                'Other...',
+            ];
+        case 'customer_escalation':
+            return [
+                'Unhappy / unacceptable',
+                'Threatening to churn',
+                'Price too high for value',
+                'Trust broken / past issues',
+                'Need immediate fix',
+                'Want refund/credit',
+                'Need executive attention',
+                'Other...',
+            ];
+        case 'personal_boundary':
+            return [
+                'Didn’t realize it was loud',
+                'Defensive (I have rights)',
+                'Minimizes the issue',
+                'Emotional / stressed',
+                'Practical constraints',
+                'Counter-complaint',
+                'I’ll try (non-committal)',
+                'Other...',
+            ];
+        case 'relationship_conversation':
+            return [
+                'Feeling attacked/defensive',
+                'Avoiding / shutting down',
+                'You’re overreacting',
+                'Misunderstanding / different needs',
+                'Emotional overwhelm',
+                'Trust issue / past hurt',
+                'Practical constraints',
+                'Other...',
+            ];
+        default:
+            return [
+                'Denial / disagreement on facts',
+                'Defensive / blame shifting',
+                'Emotional overwhelm',
+                'Avoidance / delay',
+                'Trust / credibility',
+                'Different priorities',
+                'Other...',
+            ];
+    }
 }
 
 // Finish Call Modal Component
@@ -874,7 +821,7 @@ function TreePreview({
             >
                 {node.title}
             </button>
-            {node.children.map(child => (
+            {(Array.isArray(node.children) ? node.children : []).map(child => (
                 <TreePreview
                     key={child.id}
                     node={child}

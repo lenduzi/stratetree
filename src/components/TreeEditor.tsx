@@ -241,7 +241,7 @@ function TreeNodeEditor({
                 )}
             </div>
 
-            {isExpanded && node.children.length > 0 && (
+            {isExpanded && Array.isArray(node.children) && node.children.length > 0 && (
                 <div className="tree-children">
                     {node.children.map((child) => (
                         <TreeNodeEditor

@@ -33,6 +33,7 @@ export interface StructuredBuckets {
     title?: string;
     rawCapture?: string;
     router?: ScenarioRouterResult;
+    objectionHandlers?: Record<string, TreeNode>;
 }
 
 export type ScenarioType =
@@ -45,8 +46,17 @@ export type ScenarioType =
     | 'personal_boundary'
     | 'other';
 
+export type ScenarioCategory =
+    | 'sales_partnership'
+    | 'salary_negotiation'
+    | 'customer_escalation'
+    | 'personal_boundary'
+    | 'relationship_conversation'
+    | 'general_tough_conversation';
+
 export interface ScenarioRouterResult {
     scenario_type: ScenarioType;
+    scenario_category?: ScenarioCategory;
     goal: string;
     stakeholder: string;
     tone: string;

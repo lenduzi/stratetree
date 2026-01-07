@@ -1,20 +1,43 @@
 'use server';
 
 import OpenAI from 'openai';
+import { z } from 'zod';
 import { headers } from 'next/headers';
-import { TreeNode, CallSummary, StructuredBuckets, ScenarioRouterResult, ScenarioType, NodeSentiment } from './types';
+import { TreeNode, CallSummary, StructuredBuckets, ScenarioRouterResult, ScenarioType, ScenarioCategory, NodeSentiment } from './types';
 import { v4 as uuidv4 } from 'uuid';
+
+function toStringArraySafe(value: unknown): string[] {
+    if (Array.isArray(value)) {
+        return value.map((item) => String(item)).filter(Boolean);
+    }
+    if (typeof value === 'string' && value.trim()) {
+        return [value.trim()];
+    }
+    return [];
+}
+
+// Helper: Normalize nodes (ids, arrays, sayNow/askNext aliases)
+function normalizeNode(input: any): TreeNode {
+    const childrenRaw = Array.isArray(input?.children)
+        ? input.children
+        : input?.children
+            ? [input.children]
+            : [];
+    const talkingPoints = toStringArraySafe(input?.talkingPoints ?? input?.sayNow);
+    const questions = toStringArraySafe(input?.questions ?? input?.askNext);
+    return {
+        id: typeof input?.id === 'string' ? input.id : uuidv4(),
+        title: typeof input?.title === 'string' && input.title.trim() ? input.title : 'Untitled',
+        talkingPoints,
+        questions,
+        sentiment: input?.sentiment,
+        children: childrenRaw.map(normalizeNode),
+    };
+}
 
 // Helper: Add unique IDs and sentiments to all nodes in a tree
 function addIdsToTree(node: any): TreeNode {
-    return {
-        id: node.id || uuidv4(),
-        title: node.title || 'Untitled',
-        talkingPoints: node.talkingPoints || [],
-        questions: node.questions || [],
-        sentiment: node.sentiment,
-        children: (node.children || []).map(addIdsToTree),
-    };
+    return normalizeNode(node);
 }
 
 function getOpenAIClient(userApiKey?: string): OpenAI {
@@ -30,6 +53,47 @@ const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
 
 const REQUIRED_SENTIMENTS: NodeSentiment[] = ['positive', 'neutral', 'negative'];
+
+const NodeSchema: z.ZodType<any> = z.object({
+    id: z.string().optional(),
+    title: z.string().optional(),
+    sentiment: z.enum(['positive', 'neutral', 'negative']).optional(),
+    talkingPoints: z.array(z.string()).optional(),
+    questions: z.array(z.string()).optional(),
+    sayNow: z.array(z.string()).optional(),
+    askNext: z.array(z.string()).optional(),
+    children: z.array(z.lazy(() => NodeSchema)).optional(),
+}).passthrough();
+
+const ProjectBundleSchema = z.object({
+    title: z.string().optional(),
+    goal: z.string().optional(),
+    stakeholder: z.string().optional(),
+    context: z.string().optional(),
+    decisionFrame: z.string().optional(),
+    tone: z.string().optional(),
+    scenario_type: z.enum([
+        'salary_negotiation',
+        'neighbor_conflict',
+        'sales_call',
+        'partnership',
+        'interview',
+        'performance_feedback',
+        'personal_boundary',
+        'other',
+    ]).optional(),
+    scenario_category: z.enum([
+        'sales_partnership',
+        'salary_negotiation',
+        'customer_escalation',
+        'personal_boundary',
+        'relationship_conversation',
+        'general_tough_conversation',
+    ]).optional(),
+    root: NodeSchema.optional(),
+    objections: z.array(z.string()).optional(),
+    objectionHandlers: z.record(z.string(), NodeSchema).optional(),
+}).passthrough();
 
 const SCENARIO_TREE_TEMPLATES: Record<ScenarioType, string> = {
     salary_negotiation: `Focus on compensation bands, scope, performance, timing, and trade-offs. Keep language professional, data-backed, and non-confrontational.`,
@@ -68,6 +132,39 @@ function normalizeScenarioType(value: string | undefined): ScenarioType {
         return value as ScenarioType;
     }
     return 'other';
+}
+
+function normalizeScenarioCategory(value: string | undefined, scenarioType?: ScenarioType): ScenarioCategory {
+    const allowed: ScenarioCategory[] = [
+        'sales_partnership',
+        'salary_negotiation',
+        'customer_escalation',
+        'personal_boundary',
+        'relationship_conversation',
+        'general_tough_conversation',
+    ];
+    if (value && allowed.includes(value as ScenarioCategory)) {
+        return value as ScenarioCategory;
+    }
+    switch (scenarioType) {
+        case 'sales_call':
+        case 'partnership':
+            return 'sales_partnership';
+        case 'salary_negotiation':
+            return 'salary_negotiation';
+        case 'neighbor_conflict':
+        case 'personal_boundary':
+            return 'personal_boundary';
+        case 'interview':
+        case 'performance_feedback':
+            return 'general_tough_conversation';
+        default:
+            return 'general_tough_conversation';
+    }
+}
+
+function getScenarioCategory(router?: ScenarioRouterResult): ScenarioCategory {
+    return normalizeScenarioCategory(router?.scenario_category, router?.scenario_type);
 }
 
 function toStringArray(value: unknown): string[] {
@@ -218,6 +315,155 @@ function ensureSentimentBranches(node: TreeNode): TreeNode {
     };
 }
 
+function getDefaultObjections(category: ScenarioCategory): string[] {
+    switch (category) {
+        case 'sales_partnership':
+            return [
+                'Budget',
+                'Timing / not a priority',
+                'Need approval',
+                'Already using competitor',
+                "Don't see value / unclear ROI",
+                'Too much effort to implement',
+                'Trust / credibility',
+                'Send info (stall)',
+                'Other...',
+            ];
+        case 'salary_negotiation':
+            return [
+                'Budget / comp freeze',
+                'Not the right time',
+                'Performance expectations not met',
+                'Need more scope/impact',
+                'Internal equity / bands',
+                "Let's revisit later",
+                'Non-monetary benefits instead',
+                'Headcount / org constraints',
+                'Other...',
+            ];
+        case 'customer_escalation':
+            return [
+                'Unhappy / unacceptable',
+                'Threatening to churn',
+                'Price too high for value',
+                'Trust broken / past issues',
+                'Need immediate fix',
+                'Want refund/credit',
+                'Need executive attention',
+                'Other...',
+            ];
+        case 'personal_boundary':
+            return [
+                'Didn’t realize it was loud',
+                'Defensive (I have rights)',
+                'Minimizes the issue',
+                'Emotional / stressed',
+                'Practical constraints',
+                'Counter-complaint',
+                'I’ll try (non-committal)',
+                'Other...',
+            ];
+        case 'relationship_conversation':
+            return [
+                'Feeling attacked/defensive',
+                'Avoiding / shutting down',
+                'You’re overreacting',
+                'Misunderstanding / different needs',
+                'Emotional overwhelm',
+                'Trust issue / past hurt',
+                'Practical constraints',
+                'Other...',
+            ];
+        default:
+            return [
+                'Denial / disagreement on facts',
+                'Defensive / blame shifting',
+                'Emotional overwhelm',
+                'Avoidance / delay',
+                'Trust / credibility',
+                'Different priorities',
+                'Other...',
+            ];
+    }
+}
+
+async function repairBundleJSON(raw: string, userApiKey?: string) {
+    const client = getOpenAIClient(userApiKey);
+    const systemPrompt = `You are a JSON repair assistant. Return only valid JSON matching this schema:
+{
+  "title": string,
+  "goal": string,
+  "stakeholder": string,
+  "context": string,
+  "decisionFrame": string,
+  "tone": string,
+  "scenario_type": "salary_negotiation" | "neighbor_conflict" | "sales_call" | "partnership" | "interview" | "performance_feedback" | "personal_boundary" | "other",
+  "scenario_category": "sales_partnership" | "salary_negotiation" | "customer_escalation" | "personal_boundary" | "relationship_conversation" | "general_tough_conversation",
+  "root": { "title": string, "talkingPoints"?: string[], "sayNow"?: string[], "questions"?: string[], "askNext"?: string[], "sentiment"?: "positive"|"neutral"|"negative", "children"?: [] },
+  "objections": string[],
+  "objectionHandlers": { "Label": { "title": string, "talkingPoints"?: string[], "questions"?: string[], "sentiment"?: "negative", "children"?: [] } }
+}
+Fix the JSON from the user and return only the repaired JSON.`;
+
+    const response = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: raw }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.2,
+    });
+    return response.choices[0]?.message?.content || '';
+}
+
+function normalizeBundle(parsed: any, capture: string) {
+    const routerType = normalizeScenarioType(parsed?.scenario_type);
+    const routerCategory = normalizeScenarioCategory(parsed?.scenario_category, routerType);
+    const router: ScenarioRouterResult = {
+        scenario_type: routerType,
+        scenario_category: routerCategory,
+        goal: parsed?.goal || '',
+        stakeholder: parsed?.stakeholder || '',
+        tone: parsed?.tone || '',
+        constraints: toStringArray((parsed as any)?.constraints),
+        success_criteria: toStringArray((parsed as any)?.success_criteria),
+        taboo: toStringArray((parsed as any)?.taboo),
+    };
+
+    const buckets: StructuredBuckets = {
+        goal: parsed?.goal || '',
+        stakeholder: parsed?.stakeholder || '',
+        context: parsed?.context || capture,
+        decisionFrame: parsed?.decisionFrame || '',
+        tone: parsed?.tone || '',
+        title: parsed?.title || '',
+        rawCapture: capture,
+    };
+
+    const rootSource = parsed?.root || parsed?.tree || parsed;
+    const tree = ensureSentimentBranches(addIdsToTree(rootSource));
+
+    const labels = getDefaultObjections(routerCategory);
+    const handlersRaw = parsed?.objectionHandlers || {};
+    const normalizedHandlers: Record<string, TreeNode> = {};
+    for (const label of labels) {
+        if (label === 'Other...') continue;
+        const handler = handlersRaw[label]
+            ? ensureSentimentBranches(addIdsToTree(handlersRaw[label]))
+            : fallbackSentimentNode('negative');
+        normalizedHandlers[label] = handler;
+    }
+
+    return {
+        router,
+        buckets,
+        tree,
+        objectionHandlers: normalizedHandlers,
+        objections: parsed?.objections || labels,
+    };
+}
+
 export async function routeScenarioAction(
     capture: string,
     userApiKey?: string,
@@ -229,6 +475,7 @@ export async function routeScenarioAction(
     const systemPrompt = `You are a scenario router. Based on the raw capture, return JSON only with:
 {
   "scenario_type": "salary_negotiation" | "neighbor_conflict" | "sales_call" | "partnership" | "interview" | "performance_feedback" | "personal_boundary" | "other",
+  "scenario_category": "sales_partnership" | "salary_negotiation" | "customer_escalation" | "personal_boundary" | "relationship_conversation" | "general_tough_conversation",
   "goal": "short goal statement",
   "stakeholder": "who they are talking to",
   "tone": "desired tone",
@@ -253,8 +500,10 @@ Use arrays (can be empty). Be concise, grounded, and avoid sales assumptions unl
     if (!content) throw new Error('No response from AI');
 
     const parsed = JSON.parse(content) as Partial<ScenarioRouterResult>;
+    const scenarioType = normalizeScenarioType(parsed.scenario_type);
     return {
-        scenario_type: normalizeScenarioType(parsed.scenario_type),
+        scenario_type: scenarioType,
+        scenario_category: normalizeScenarioCategory(parsed.scenario_category, scenarioType),
         goal: parsed.goal || '',
         stakeholder: parsed.stakeholder || '',
         tone: parsed.tone || '',
@@ -282,6 +531,148 @@ export async function generateTreeFromBucketsAction(
 ): Promise<TreeNode> {
     await enforceRateLimit(clientId);
     return generateTreeFromBuckets(buckets, userApiKey, router);
+}
+
+export async function generateObjectionHandlersAction(
+    router: ScenarioRouterResult,
+    buckets: StructuredBuckets,
+    userApiKey?: string,
+    clientId?: string
+): Promise<Record<string, TreeNode>> {
+    await enforceRateLimit(clientId);
+    const client = getOpenAIClient(userApiKey);
+    const category = getScenarioCategory(router);
+    const objections = getDefaultObjections(category).filter((label) => label !== 'Other...');
+
+    const systemPrompt = `Generate objection handlers for the given list. For each objection label, output a node with:
+- title (2-4 words)
+- talkingPoints (1-2 short lines)
+- questions (2 short questions)
+- sentiment: "negative"
+- children: exactly 3 child nodes (positive/neutral/negative)
+
+Return JSON object:
+{ "handlers": { "Label": { ...node }, ... } }`;
+
+    const response = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: systemPrompt },
+            {
+                role: 'user',
+                content: `Scenario category: ${category}
+Goal: ${buckets.goal}
+Stakeholder: ${buckets.stakeholder}
+Context: ${buckets.context}
+Decision frame: ${buckets.decisionFrame}
+Tone: ${buckets.tone || router.tone}
+
+Objections: ${objections.join(', ')}`
+            }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.6,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) throw new Error('No response from AI');
+    const parsed = JSON.parse(content) as { handlers?: Record<string, TreeNode> };
+    const handlers = parsed.handlers || {};
+    const normalized: Record<string, TreeNode> = {};
+    for (const [label, node] of Object.entries(handlers)) {
+        const normalizedNode = ensureSentimentBranches(addIdsToTree(node));
+        normalized[label] = normalizedNode;
+    }
+    return normalized;
+}
+
+export async function generateProjectBundleAction(
+    capture: string,
+    userApiKey?: string,
+    clientId?: string
+): Promise<{ buckets: StructuredBuckets; tree: TreeNode; router: ScenarioRouterResult; objectionHandlers: Record<string, TreeNode> }> {
+    await enforceRateLimit(clientId);
+    const client = getOpenAIClient(userApiKey);
+    const start = Date.now();
+
+    const systemPrompt = `You are YapMap. Return ONE compact JSON response with:
+- title, goal, stakeholder, context, decisionFrame, tone
+- scenario_type + scenario_category
+- root node with 3 children: positive, neutral, negative
+- Each node includes 1-2 sayNow lines + 2-3 askNext questions
+- Each node must include exactly 3 children with sentiments positive/neutral/negative
+- objections: list of 6-10 short labels plus "Other..."
+- objectionHandlers: map label -> node that handles the objection (sentiment "negative") with 3 children
+Keep strings short. Limit arrays to max 2-3 items.
+
+Return JSON with keys:
+{
+  "title": string,
+  "goal": string,
+  "stakeholder": string,
+  "context": string,
+  "decisionFrame": string,
+  "tone": string,
+  "scenario_type": "...",
+  "scenario_category": "...",
+  "root": { "title": "...", "sayNow": [], "askNext": [], "sentiment": "neutral", "children": [] },
+  "objections": ["..."],
+  "objectionHandlers": { "Label": { "title": "...", "sayNow": [], "askNext": [], "sentiment": "negative", "children": [] } }
+}`;
+
+    const userPrompt = `Raw capture: ${capture}`;
+
+    const aiStart = Date.now();
+    const stream = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.6,
+        stream: true,
+    });
+
+    let raw = '';
+    for await (const chunk of stream) {
+        raw += chunk.choices[0]?.delta?.content || '';
+    }
+    console.log('[generateProjectBundleAction] ai_ms', Date.now() - aiStart);
+
+    let parsed: any = null;
+    try {
+        parsed = JSON.parse(raw);
+    } catch {
+        parsed = null;
+    }
+
+    let validated = parsed ? ProjectBundleSchema.safeParse(parsed) : null;
+    if (!validated || !validated.success) {
+        const repaired = await repairBundleJSON(raw, userApiKey);
+        try {
+            const repairedParsed = JSON.parse(repaired);
+            validated = ProjectBundleSchema.safeParse(repairedParsed);
+            if (validated.success) {
+                parsed = validated.data;
+            }
+        } catch {
+            // noop
+        }
+    }
+
+    if (!parsed) {
+        throw new Error('Invalid AI output');
+    }
+
+    const normalized = normalizeBundle(parsed, capture);
+    console.log('[generateProjectBundleAction] total_ms', Date.now() - start);
+    return {
+        buckets: normalized.buckets,
+        tree: normalized.tree,
+        router: normalized.router,
+        objectionHandlers: normalized.objectionHandlers,
+    };
 }
 
 // Generate a decision tree from a scenario description
@@ -428,16 +819,55 @@ async function generateTreeFromBuckets(
     return treeHasSentimentCoverage(retryTree) ? retryTree : ensureSentimentBranches(retryTree);
 }
 
+export async function generateObjectionStep(
+    objectionLabel: string,
+    contextSummary: string,
+    userApiKey?: string,
+    clientId?: string
+): Promise<{ title: string; sayThisNow: string[]; askNext: string[] }> {
+    await enforceRateLimit(clientId);
+    const client = getOpenAIClient(userApiKey);
+
+    const systemPrompt = `You generate objection-specific talking points for a call.
+Return JSON with:
+{
+  "title": "Handle: <objection>",
+  "sayThisNow": ["short line 1", "short line 2"],
+  "askNext": ["short question 1", "short question 2", "short question 3"]
+}
+Keep it brief, calm, and actionable.`;
+
+    const response = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: `Objection: ${objectionLabel}\nContext: ${contextSummary}` }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.5,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) throw new Error('No response from AI');
+    const parsed = JSON.parse(content) as { title?: string; sayThisNow?: string[]; askNext?: string[] };
+    return {
+        title: parsed.title || `Handle: ${objectionLabel}`,
+        sayThisNow: toStringArraySafe(parsed.sayThisNow),
+        askNext: toStringArraySafe(parsed.askNext),
+    };
+}
+
 export async function structureProjectAction(
     capture: string,
     userApiKey?: string,
     clientId?: string
-): Promise<{ buckets: StructuredBuckets; tree: TreeNode; router: ScenarioRouterResult }> {
+): Promise<{ buckets: StructuredBuckets; tree: TreeNode; router: ScenarioRouterResult; objectionHandlers: Record<string, TreeNode> }> {
     await enforceRateLimit(clientId);
     const router = await routeScenarioAction(capture, userApiKey, clientId);
     const buckets = await extractStructuredBuckets(capture, userApiKey, router);
     const tree = await generateTreeFromBuckets(buckets, userApiKey, router);
-    return { buckets, tree, router };
+    const objectionHandlers = await generateObjectionHandlersAction(router, buckets, userApiKey, clientId);
+    return { buckets, tree, router, objectionHandlers };
 }
 
 export async function regenerateBucketAction(
