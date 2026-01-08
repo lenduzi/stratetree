@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Project, TreeNode, CallSummary, NodeSentiment, ObjectionBundle } from '@/lib/types';
 import { PanicButton } from './PanicButton';
-import { findNodeById, getPathToNode, addChildToNode, updateNodeInTree } from '@/lib/hooks';
+import { addChildToNode, updateNodeInTree } from '@/lib/hooks';
 import { saveProject } from '@/lib/db';
 import { v4 as uuidv4 } from 'uuid';
 import { getSentimentClass, getSentimentEmoji } from './NodeCard';
@@ -14,6 +14,23 @@ import { upsertGuestProject } from '@/lib/guest';
 interface FocusedViewProps {
     project: Project;
     onProjectUpdate?: (project: Project) => void;
+}
+
+type NodeIndex = {
+    nodeMap: Map<string, TreeNode>;
+    parentMap: Map<string, string | null>;
+};
+
+function buildNodeIndex(root: TreeNode): NodeIndex {
+    const nodeMap = new Map<string, TreeNode>();
+    const parentMap = new Map<string, string | null>();
+    const walk = (node: TreeNode, parentId: string | null) => {
+        nodeMap.set(node.id, node);
+        parentMap.set(node.id, parentId);
+        node.children.forEach((child) => walk(child, node.id));
+    };
+    walk(root, null);
+    return { nodeMap, parentMap };
 }
 
 export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
@@ -36,9 +53,19 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
     const [activeTag, setActiveTag] = useState<string | null>(null);
     const touchStartX = useRef<number | null>(null);
 
-    const currentNode = findNodeById(project.rootNode, currentNodeId) || project.rootNode;
+    const nodeIndex = useMemo(() => buildNodeIndex(project.rootNode), [project.rootNode]);
+    const currentNode = nodeIndex.nodeMap.get(currentNodeId) || project.rootNode;
     const childList = Array.isArray(currentNode.children) ? currentNode.children : [];
-    const path = getPathToNode(project.rootNode, currentNodeId) || [project.rootNode];
+    const path = useMemo(() => {
+        const nodes: TreeNode[] = [];
+        let cursor: string | null = currentNodeId;
+        while (cursor) {
+            const node = nodeIndex.nodeMap.get(cursor);
+            if (node) nodes.unshift(node);
+            cursor = nodeIndex.parentMap.get(cursor) || null;
+        }
+        return nodes.length > 0 ? nodes : [project.rootNode];
+    }, [currentNodeId, nodeIndex, project.rootNode]);
     const talkingLines = Array.isArray(currentNode.talkingPoints) ? currentNode.talkingPoints : [];
     const questionLines = Array.isArray(currentNode.questions) ? currentNode.questions : [];
     const isLowAskNext = questionLines.length < 2;
@@ -65,17 +92,15 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
         }
         : undefined;
 
-    const allObjectionNodes = (() => {
+    const allObjectionNodes = useMemo(() => {
         const results: TreeNode[] = [];
-        const walk = (node: TreeNode) => {
+        nodeIndex.nodeMap.forEach((node) => {
             if (node.type === 'objection' || node.objectionBundle) {
                 results.push(node);
             }
-            node.children.forEach(walk);
-        };
-        walk(project.rootNode);
+        });
         return results;
-    })();
+    }, [nodeIndex]);
 
     const allTags = Array.from(new Set(allObjectionNodes.flatMap((node) => node.objectionBundle?.tags || []))).filter(Boolean);
     const filteredObjections = allObjectionNodes.filter((node) => {
@@ -108,6 +133,25 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
         setActivePanel(null);
         setSecondaryReveal(null);
         setShowMore(false);
+    }, [currentNodeId]);
+
+    useEffect(() => {
+        if (process.env.NODE_ENV !== 'development') return;
+        const start = performance.now();
+        console.log('[call] open_ms', Math.round(start));
+        return () => {
+            const end = performance.now();
+            console.log('[call] close_ms', Math.round(end - start));
+        };
+    }, []);
+
+    useEffect(() => {
+        if (process.env.NODE_ENV !== 'development') return;
+        const t0 = performance.now();
+        requestAnimationFrame(() => {
+            const t1 = performance.now();
+            console.log('[call] switch_ms', Math.round(t1 - t0));
+        });
     }, [currentNodeId]);
 
     const navigateSibling = (direction: -1 | 1) => {
@@ -181,7 +225,7 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
     }, [currentNode, path, showFullTree, showFinishModal, isObjectionNode]);
 
     const navigateToNode = (nodeId: string) => {
-        const node = findNodeById(project.rootNode, nodeId);
+        const node = nodeIndex.nodeMap.get(nodeId);
         setLastSelectedSentiment(node?.sentiment || null);
         setCurrentNodeId(nodeId);
         setVisitedPath(prev => [...prev, nodeId]);
@@ -238,7 +282,7 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
             navigateToNode(child.id);
         } else {
             ensureFallbackChildren();
-            const updatedChild = findNodeById(project.rootNode, currentNodeId)?.children?.find((node) => node.sentiment === sentiment);
+            const updatedChild = nodeIndex.nodeMap.get(currentNodeId)?.children?.find((node) => node.sentiment === sentiment);
             if (updatedChild) {
                 navigateToNode(updatedChild.id);
             }
@@ -314,7 +358,7 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
     // Get visited path as titles
     const getVisitedTitles = () => {
         return visitedPath
-            .map(id => findNodeById(project.rootNode, id)?.title)
+            .map(id => nodeIndex.nodeMap.get(id)?.title)
             .filter((t): t is string => !!t);
     };
 

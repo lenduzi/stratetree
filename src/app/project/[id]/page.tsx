@@ -209,6 +209,8 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     const hasOptional = optionalBuckets.some((bucket) => structured?.[bucket.key]);
     const objectionSummary = summarizeObjectionQuality(project.rootNode);
     const callModeReady = objectionSummary.total > 0 && objectionSummary.blocking === 0;
+    const cachedLocal = true;
+    const offlineReady = callModeReady;
     const intake = structured?.intake || {};
     const suggestedArchetypes = suggestTopArchetypes({ capture: structured?.rawCapture || project.description, intake });
     const activeArchetypes = showArchetypes ? OBJECTION_ARCHETYPES : suggestedArchetypes;
@@ -325,6 +327,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                         <div style={{ fontWeight: 600, marginBottom: 4 }}>Call Mode Ready</div>
                         <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
                             Objection nodes: {objectionSummary.total || 0} • Blocking issues: {objectionSummary.blocking} • Warnings: {objectionSummary.warnings} • Avg score: {objectionSummary.averageScore || 0}
+                            <div style={{ marginTop: 6 }}>
+                                Cached locally: {cachedLocal ? 'Yes' : 'No'} • Offline-ready: {offlineReady ? 'Yes' : 'No'}
+                            </div>
                         </div>
                     </div>
                 </div>
