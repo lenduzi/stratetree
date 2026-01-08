@@ -38,10 +38,13 @@ export default function LoginPage() {
             return;
         }
         const origin = window.location.origin;
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('yapmap-auth-redirect', redirectPath);
+        }
         const { error } = await supabase.auth.signInWithOAuth({
             provider: 'google',
             options: {
-                redirectTo: `${origin}/auth/callback?next=${encodeURIComponent(redirectPath)}`,
+                redirectTo: `${origin}/auth/callback`,
             },
         });
         if (error) {
