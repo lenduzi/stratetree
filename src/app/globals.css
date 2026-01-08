@@ -705,6 +705,142 @@ textarea {
   margin-top: var(--space-md);
 }
 
+.focused-view.call-mode .call-search-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-sm);
+}
+
+.focused-view.call-mode .call-search-panel {
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 70%, transparent);
+  border-radius: var(--radius-lg);
+  padding: var(--space-md);
+  margin-bottom: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.focused-view.call-mode .call-search-input {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.focused-view.call-mode .call-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.focused-view.call-mode .tag-chip {
+  border-radius: var(--radius-full);
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
+  background: color-mix(in srgb, var(--bg-card) 80%, transparent);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.focused-view.call-mode .tag-chip.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.focused-view.call-mode .call-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.focused-view.call-mode .call-search-item {
+  text-align: left;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.focused-view.call-mode .call-search-empty {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.focused-view.call-mode .objection-card {
+  background: color-mix(in srgb, var(--bg-secondary) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 60%, transparent);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(20px);
+}
+
+.focused-view.call-mode .objection-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.focused-view.call-mode .objection-primary {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.focused-view.call-mode .objection-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-sm);
+}
+
+.focused-view.call-mode .objection-panel {
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
+  background: color-mix(in srgb, var(--bg-card) 85%, transparent);
+  padding: var(--space-md);
+  color: var(--text-secondary);
+}
+
+.focused-view.call-mode .objection-panel.secondary {
+  background: color-mix(in srgb, var(--bg-card) 70%, transparent);
+  font-size: 0.9rem;
+}
+
+.focused-view.call-mode .objection-secondary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.focused-view.call-mode .emotion-toggle {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-xs);
+}
+
+.focused-view.call-mode .emotion-chip {
+  border-radius: var(--radius-full);
+  padding: 0.35rem 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
+  background: color-mix(in srgb, var(--bg-card) 80%, transparent);
+  cursor: pointer;
+}
+
+.focused-view.call-mode .emotion-chip.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
 .focused-view.call-mode .say-now-header {
   display: flex;
   align-items: center;

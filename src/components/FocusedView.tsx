@@ -1,16 +1,13 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Project, TreeNode, CallSummary, NodeSentiment } from '@/lib/types';
+import { Project, TreeNode, CallSummary, NodeSentiment, ObjectionBundle } from '@/lib/types';
 import { PanicButton } from './PanicButton';
 import { findNodeById, getPathToNode, addChildToNode, updateNodeInTree } from '@/lib/hooks';
 import { saveProject } from '@/lib/db';
-import { generateAskNextAction, generateCallSummaryAction, generateNextMovesAction, generateObjectionStep } from '@/lib/actions';
 import { v4 as uuidv4 } from 'uuid';
 import { getSentimentClass, getSentimentEmoji } from './NodeCard';
-import { getBrowserApiKey } from '@/lib/settings';
-import { getClientId } from '@/lib/client-id';
 import { supabase } from '@/lib/supabase';
 import { upsertGuestProject } from '@/lib/guest';
 
@@ -26,20 +23,18 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
     const [visitedPath, setVisitedPath] = useState<string[]>([project.rootNode.id]);
     const [showFinishModal, setShowFinishModal] = useState(false);
     const [showMore, setShowMore] = useState(false);
-    const [lastMoveLabel, setLastMoveLabel] = useState<string | null>(null);
     const [lastSelectedSentiment, setLastSelectedSentiment] = useState<TreeNode['sentiment'] | null>(null);
     const [isAuthed, setIsAuthed] = useState<boolean | null>(null);
-    const [isGeneratingNextMoves, setIsGeneratingNextMoves] = useState(false);
-    const [askNextGenerating, setAskNextGenerating] = useState(false);
-    const [askNextError, setAskNextError] = useState<string | null>(null);
     const [idleNudge, setIdleNudge] = useState(false);
-    const lastGeneratedAtRef = useRef<Record<string, number>>({});
-    const lastMovesGeneratedAtRef = useRef<Record<string, number>>({});
-    const objectionHintsRef = useRef<Record<string, string>>({});
     const [negativePulse, setNegativePulse] = useState(false);
-    const [objectionLoading, setObjectionLoading] = useState(false);
-    const [objectionError, setObjectionError] = useState<string | null>(null);
     const [guestPromptOpen, setGuestPromptOpen] = useState(false);
+    const [activePanel, setActivePanel] = useState<'question' | 'soft' | 'direct' | 'next' | null>(null);
+    const [secondaryReveal, setSecondaryReveal] = useState<'proof' | 'risk' | 'challenger' | null>(null);
+    const [emotion, setEmotion] = useState<'neutral' | 'annoyed' | 'skeptical' | 'cold'>('neutral');
+    const [showSearch, setShowSearch] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [activeTag, setActiveTag] = useState<string | null>(null);
+    const touchStartX = useRef<number | null>(null);
 
     const currentNode = findNodeById(project.rootNode, currentNodeId) || project.rootNode;
     const childList = Array.isArray(currentNode.children) ? currentNode.children : [];
@@ -55,6 +50,41 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
         negative: childList.find((child) => child.sentiment === 'negative') || null,
     };
     const nextMovesNeeded = !sentimentChildren.positive || !sentimentChildren.neutral || !sentimentChildren.negative;
+    const isObjectionNode = currentNode.type === 'objection' || !!currentNode.objectionBundle;
+
+    const baseBundle: ObjectionBundle | undefined = currentNode.objectionBundle;
+    const emotionVariant = baseBundle?.emotionVariants?.[emotion];
+    const mergedBundle = baseBundle
+        ? {
+            ...baseBundle,
+            ...emotionVariant,
+            responses: {
+                ...baseBundle.responses,
+                ...emotionVariant?.responses,
+            },
+        }
+        : undefined;
+
+    const allObjectionNodes = (() => {
+        const results: TreeNode[] = [];
+        const walk = (node: TreeNode) => {
+            if (node.type === 'objection' || node.objectionBundle) {
+                results.push(node);
+            }
+            node.children.forEach(walk);
+        };
+        walk(project.rootNode);
+        return results;
+    })();
+
+    const allTags = Array.from(new Set(allObjectionNodes.flatMap((node) => node.objectionBundle?.tags || []))).filter(Boolean);
+    const filteredObjections = allObjectionNodes.filter((node) => {
+        const titleMatch = node.title.toLowerCase().includes(searchQuery.toLowerCase());
+        const tags = node.objectionBundle?.tags || [];
+        const tagMatch = activeTag ? tags.includes(activeTag) : true;
+        const queryMatch = searchQuery ? titleMatch || tags.some((tag) => tag.toLowerCase().includes(searchQuery.toLowerCase())) : true;
+        return tagMatch && queryMatch;
+    }).slice(0, 6);
 
     useEffect(() => {
         const checkAuth = async () => {
@@ -62,8 +92,8 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                 setIsAuthed(false);
                 return;
             }
-            const { data: { user } } = await supabase.auth.getUser();
-            setIsAuthed(!!user);
+            const { data: { session } } = await supabase.auth.getSession();
+            setIsAuthed(!!session?.user);
         };
         checkAuth();
     }, []);
@@ -74,23 +104,49 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
         return () => window.clearTimeout(timer);
     }, [currentNodeId]);
 
+    useEffect(() => {
+        setActivePanel(null);
+        setSecondaryReveal(null);
+        setShowMore(false);
+    }, [currentNodeId]);
+
+    const navigateSibling = (direction: -1 | 1) => {
+        if (path.length < 2) return;
+        const parent = path[path.length - 2];
+        const siblings = parent.children || [];
+        const index = siblings.findIndex((node) => node.id === currentNodeId);
+        if (index === -1) return;
+        const nextIndex = index + direction;
+        const target = siblings[nextIndex];
+        if (target) {
+            navigateToNode(target.id);
+        }
+    };
+
     // Keyboard navigation
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             // Don't handle keys when modal is open
             if (showFinishModal) return;
 
-            if (e.key === '1') {
-                handleSelectResponse('positive');
-                return;
-            }
-            if (e.key === '2') {
-                handleSelectResponse('neutral');
-                return;
-            }
-            if (e.key === '3') {
-                handleSelectResponse('negative');
-                return;
+            if (isObjectionNode) {
+                if (e.key === '1') setActivePanel('question');
+                if (e.key === '2') setActivePanel('soft');
+                if (e.key === '3') setActivePanel('direct');
+                if (e.key === '4') setActivePanel('next');
+            } else {
+                if (e.key === '1') {
+                    handleSelectResponse('positive');
+                    return;
+                }
+                if (e.key === '2') {
+                    handleSelectResponse('neutral');
+                    return;
+                }
+                if (e.key === '3') {
+                    handleSelectResponse('negative');
+                    return;
+                }
             }
 
             switch (e.key) {
@@ -111,18 +167,21 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                         setShowFullTree(false);
                     }
                     break;
+                case 'ArrowLeft':
+                    navigateSibling(-1);
+                    break;
+                case 'ArrowRight':
+                    navigateSibling(1);
+                    break;
             }
         };
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [currentNode, path, showFullTree, showFinishModal]);
+    }, [currentNode, path, showFullTree, showFinishModal, isObjectionNode]);
 
     const navigateToNode = (nodeId: string) => {
         const node = findNodeById(project.rootNode, nodeId);
-        if (node?.title) {
-            setLastMoveLabel(node.title);
-        }
         setLastSelectedSentiment(node?.sentiment || null);
         setCurrentNodeId(nodeId);
         setVisitedPath(prev => [...prev, nodeId]);
@@ -134,136 +193,55 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
         }
     };
 
-    const handleGenerateNextMoves = useCallback(async () => {
-        const now = Date.now();
-        const last = lastMovesGeneratedAtRef.current[currentNodeId] || 0;
-        if (isGeneratingNextMoves || now - last < 5000) return;
+    const ensureFallbackChildren = () => {
         if (!nextMovesNeeded) return;
-
-        lastMovesGeneratedAtRef.current[currentNodeId] = now;
-        setIsGeneratingNextMoves(true);
-        try {
-            const objectionHint = objectionHintsRef.current[currentNodeId];
-            const baseArgs = [
-                currentNode,
-                project.structured?.goal || project.description,
-                project.structured?.router,
-                lastMoveLabel || undefined,
-                objectionHint || undefined,
-                getBrowserApiKey() || undefined,
-                getClientId(),
-            ] as const;
-            let nodes = await generateNextMovesAction(...baseArgs, false);
-            if (nodes.length < 2) {
-                nodes = await generateNextMovesAction(...baseArgs, true);
-            }
-            if (nodes.length < 3) {
-                nodes = [
-                    {
-                        id: uuidv4(),
-                        title: 'Ask a clarifying question',
-                        talkingPoints: ['Can you share more about what’s most important here?'],
-                        questions: ['What matters most to you in this situation?'],
-                        sentiment: 'neutral',
-                        children: [],
-                    },
-                    {
-                        id: uuidv4(),
-                        title: 'Summarize and confirm',
-                        talkingPoints: ['Let me summarize to make sure I’ve got it right.'],
-                        questions: ['Did I capture that correctly?'],
-                        sentiment: 'neutral',
-                        children: [],
-                    },
-                    {
-                        id: uuidv4(),
-                        title: 'Propose next step',
-                        talkingPoints: ['Here’s a simple next step we can take.'],
-                        questions: ['Would that work for you?'],
-                        sentiment: 'positive',
-                        children: [],
-                    },
-                ] satisfies TreeNode[];
-            }
-            let updatedRoot = project.rootNode;
-            nodes.forEach((node) => {
+        const fallbackNodes: TreeNode[] = [
+            {
+                id: uuidv4(),
+                title: 'Positive response',
+                talkingPoints: ['Acknowledge the alignment and move forward.'],
+                questions: ['What would make this a clear yes?'],
+                sentiment: 'positive',
+                children: [],
+            },
+            {
+                id: uuidv4(),
+                title: 'Neutral response',
+                talkingPoints: ['Stay curious and keep momentum.'],
+                questions: ['What would you want to see next?'],
+                sentiment: 'neutral',
+                children: [],
+            },
+            {
+                id: uuidv4(),
+                title: 'Pushback',
+                talkingPoints: ['Acknowledge concerns and invite specifics.'],
+                questions: ['What’s the biggest concern right now?'],
+                sentiment: 'negative',
+                children: [],
+            },
+        ];
+        let updatedRoot = project.rootNode;
+        fallbackNodes.forEach((node) => {
+            if (!childList.find((child) => child.sentiment === node.sentiment)) {
                 updatedRoot = addChildToNode(updatedRoot, currentNodeId, node);
-            });
-            const updatedProject = { ...project, rootNode: updatedRoot };
-            await saveProject(updatedProject);
-            onProjectUpdate?.(updatedProject);
-        } catch (e) {
-            console.warn('Failed to generate next moves', e);
-            const fallbackNodes = [
-                {
-                    id: uuidv4(),
-                    title: 'Ask a clarifying question',
-                    talkingPoints: ['Can you share more about what’s most important here?'],
-                    questions: ['What matters most to you in this situation?'],
-                    sentiment: 'neutral',
-                    children: [],
-                },
-                {
-                    id: uuidv4(),
-                    title: 'Summarize and confirm',
-                    talkingPoints: ['Let me summarize to make sure I’ve got it right.'],
-                    questions: ['Did I capture that correctly?'],
-                    sentiment: 'neutral',
-                    children: [],
-                },
-                {
-                    id: uuidv4(),
-                    title: 'Propose next step',
-                    talkingPoints: ['Here’s a simple next step we can take.'],
-                    questions: ['Would that work for you?'],
-                    sentiment: 'positive',
-                    children: [],
-                },
-            ] satisfies TreeNode[];
-            let updatedRoot = project.rootNode;
-            fallbackNodes.forEach((node) => {
-                updatedRoot = addChildToNode(updatedRoot, currentNodeId, node);
-            });
-            const updatedProject = { ...project, rootNode: updatedRoot };
-            await saveProject(updatedProject);
-            onProjectUpdate?.(updatedProject);
-        } finally {
-            setIsGeneratingNextMoves(false);
-        }
-    }, [
-        currentNode,
-        currentNodeId,
-        isGeneratingNextMoves,
-        nextMovesNeeded,
-        project,
-        lastMoveLabel,
-        onProjectUpdate,
-    ]);
-
-    useEffect(() => {
-        if (nextMovesNeeded) {
-            handleGenerateNextMoves();
-        }
-    }, [nextMovesNeeded, handleGenerateNextMoves]);
-
-    const [pendingSentiment, setPendingSentiment] = useState<NodeSentiment | null>(null);
-
-    useEffect(() => {
-        if (!pendingSentiment) return;
-        const child = sentimentChildren[pendingSentiment];
-        if (child) {
-            setPendingSentiment(null);
-            navigateToNode(child.id);
-        }
-    }, [pendingSentiment, sentimentChildren, navigateToNode]);
+            }
+        });
+        const updatedProject = { ...project, rootNode: updatedRoot };
+        saveProject(updatedProject, false);
+        onProjectUpdate?.(updatedProject);
+    };
 
     const handleSelectResponse = (sentiment: NodeSentiment) => {
         const child = sentimentChildren[sentiment];
         if (child) {
             navigateToNode(child.id);
         } else {
-            setPendingSentiment(sentiment);
-            handleGenerateNextMoves();
+            ensureFallbackChildren();
+            const updatedChild = findNodeById(project.rootNode, currentNodeId)?.children?.find((node) => node.sentiment === sentiment);
+            if (updatedChild) {
+                navigateToNode(updatedChild.id);
+            }
         }
     };
 
@@ -283,53 +261,38 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
         const isOther = label === 'Other...';
         const selectedLabel = isOther ? window.prompt('What are they resisting?') : label;
         if (!selectedLabel) return;
-
-        setObjectionError(null);
-        setObjectionLoading(true);
-        const t0 = Date.now();
-        try {
-            const contextSummary = [
-                project.structured?.goal,
-                project.structured?.stakeholder,
-                project.structured?.context,
-                project.structured?.decisionFrame,
-            ].filter(Boolean).join(' | ');
-            const step = await generateObjectionStep(
-                selectedLabel,
-                contextSummary || project.description,
-                getBrowserApiKey() || undefined,
-                getClientId()
-            );
-            console.log('[panic] objection_ms', Date.now() - t0);
-            const existingNegative = sentimentChildren.negative;
-            const targetId = existingNegative?.id || uuidv4();
-            const updatedNegative: TreeNode = {
-                id: targetId,
-                title: step.title,
-                talkingPoints: step.sayThisNow || [],
-                questions: step.askNext || [],
+        const handler = project.structured?.objectionHandlers?.[selectedLabel];
+        const handlerNode: TreeNode = handler
+            ? { ...handler, type: handler.type || 'objection' }
+            : {
+                id: uuidv4(),
+                title: `Handle: ${selectedLabel}`,
                 sentiment: 'negative',
-                children: existingNegative?.children || [],
+                type: 'objection',
+                talkingPoints: ['Acknowledge the concern and clarify specifics.'],
+                questions: ['What’s the biggest concern here?'],
+                children: [],
             };
-            let updatedRoot = project.rootNode;
-            if (existingNegative) {
-                updatedRoot = updateNodeInTree(updatedRoot, existingNegative.id, () => updatedNegative);
-            } else {
-                updatedRoot = addChildToNode(updatedRoot, currentNodeId, updatedNegative);
-            }
-            objectionHintsRef.current[targetId] = selectedLabel;
-            const updatedProject = { ...project, rootNode: updatedRoot };
-            await saveProject(updatedProject);
-            onProjectUpdate?.(updatedProject);
-            setNegativePulse(true);
-            window.setTimeout(() => setNegativePulse(false), 800);
-            navigateToNode(targetId);
-        } catch (e) {
-            console.warn('Failed to generate objection step', e);
-            setObjectionError('Couldn’t generate objection help — try again');
-        } finally {
-            setObjectionLoading(false);
+        const existingNegative = sentimentChildren.negative;
+        const targetId = existingNegative?.id || uuidv4();
+        const updatedNegative: TreeNode = {
+            ...handlerNode,
+            id: targetId,
+            sentiment: 'negative',
+            children: existingNegative?.children || handlerNode.children || [],
+        };
+        let updatedRoot = project.rootNode;
+        if (existingNegative) {
+            updatedRoot = updateNodeInTree(updatedRoot, existingNegative.id, () => updatedNegative);
+        } else {
+            updatedRoot = addChildToNode(updatedRoot, currentNodeId, updatedNegative);
         }
+        const updatedProject = { ...project, rootNode: updatedRoot };
+        await saveProject(updatedProject, false);
+        onProjectUpdate?.(updatedProject);
+        setNegativePulse(true);
+        window.setTimeout(() => setNegativePulse(false), 800);
+        navigateToNode(targetId);
     };
 
     const handleGuestGoogle = async () => {
@@ -346,55 +309,7 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
         });
     };
 
-    const handleAskNextAutogen = useCallback(async () => {
-        const now = Date.now();
-        const last = lastGeneratedAtRef.current[currentNodeId] || 0;
-        if (askNextGenerating || now - last < 5000) return;
-        if (questionLines.length >= 2) return;
-
-        lastGeneratedAtRef.current[currentNodeId] = now;
-        setAskNextGenerating(true);
-        setAskNextError(null);
-        try {
-            const questions = await generateAskNextAction(
-                currentNode,
-                project.structured?.goal || project.description,
-                project.structured?.router,
-                lastMoveLabel || undefined,
-                getBrowserApiKey() || undefined,
-                getClientId()
-            );
-            if (questions.length === 0) {
-                throw new Error('No questions generated');
-            }
-            const updatedRoot = updateNodeInTree(project.rootNode, currentNodeId, (node) => ({
-                ...node,
-                questions,
-            }));
-            const updatedProject = { ...project, rootNode: updatedRoot };
-            await saveProject(updatedProject);
-            onProjectUpdate?.(updatedProject);
-        } catch (e) {
-            setAskNextError(e instanceof Error ? e.message : 'Failed to generate questions');
-        } finally {
-            setAskNextGenerating(false);
-        }
-    }, [
-        askNextGenerating,
-        currentNode,
-        currentNodeId,
-        lastGeneratedAtRef,
-        lastMoveLabel,
-        project,
-        questionLines.length,
-        onProjectUpdate,
-    ]);
-
-    useEffect(() => {
-        if (questionLines.length < 2) {
-            handleAskNextAutogen();
-        }
-    }, [handleAskNextAutogen, questionLines.length]);
+    
 
     // Get visited path as titles
     const getVisitedTitles = () => {
@@ -402,6 +317,30 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
             .map(id => findNodeById(project.rootNode, id)?.title)
             .filter((t): t is string => !!t);
     };
+
+    const primaryLine = mergedBundle?.primaryLine || talkingLines[0] || ' ';
+    const questionLine = mergedBundle?.diagnoseQuestion || questionLines[0] || '';
+    const softLine = mergedBundle?.responses?.soft || '';
+    const directLine = mergedBundle?.responses?.direct || '';
+    const challengerLine = mergedBundle?.responses?.challenger || '';
+    const nextStepLine = mergedBundle?.nextStep || '';
+    const proofLine = mergedBundle?.proof || '';
+    const riskLine = mergedBundle?.riskReset || '';
+
+    const activePanelContent = (() => {
+        switch (activePanel) {
+            case 'question':
+                return questionLine;
+            case 'soft':
+                return softLine;
+            case 'direct':
+                return directLine;
+            case 'next':
+                return nextStepLine;
+            default:
+                return '';
+        }
+    })();
 
     return (
         <div className="focused-view call-mode">
@@ -430,71 +369,181 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
             </header>
 
             {/* Main content */}
-            <main className="focused-content">
-                {/* Current node - what to say now */}
-                <div className={`current-node say-now-card ${getSentimentClass(currentNode.sentiment)}`}>
-                    <div className="say-now-header">
-                        <span className="say-now-label">Say this now</span>
-                        <div className="say-now-actions">
-                            {talkingLines.length > 2 && (
+            <main
+                className="focused-content"
+                onTouchStart={(e) => {
+                    touchStartX.current = e.touches[0]?.clientX ?? null;
+                }}
+                onTouchEnd={(e) => {
+                    if (touchStartX.current == null) return;
+                    const endX = e.changedTouches[0]?.clientX ?? 0;
+                    const delta = endX - touchStartX.current;
+                    if (Math.abs(delta) > 60) {
+                        navigateSibling(delta > 0 ? -1 : 1);
+                    }
+                    touchStartX.current = null;
+                }}
+            >
+                <div className="call-search-row">
+                    <button className="btn btn-secondary btn-sm" onClick={() => setShowSearch((prev) => !prev)}>
+                        {showSearch ? 'Hide search' : 'Find objection'}
+                    </button>
+                </div>
+                {showSearch && (
+                    <div className="call-search-panel">
+                        <input
+                            className="call-search-input"
+                            placeholder="Search objections"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                        <div className="call-tag-row">
+                            {allTags.map((tag) => (
                                 <button
-                                    className="btn btn-secondary btn-sm"
-                                    onClick={() => setShowMore((prev) => !prev)}
+                                    key={tag}
+                                    className={`tag-chip ${activeTag === tag ? 'active' : ''}`}
+                                    onClick={() => setActiveTag((prev) => (prev === tag ? null : tag))}
                                 >
-                                    {showMore ? 'Less' : 'More'}
+                                    {tag}
                                 </button>
-                            )}
-                        </div>
-                    </div>
-                    <h1 className="current-node-title">
-                        {currentNode.sentiment && <span style={{ marginRight: 8 }}>{getSentimentEmoji(currentNode.sentiment)}</span>}
-                        {currentNode.title}
-                    </h1>
-                    {talkingLines.length > 0 && (
-                        <div className={`say-now-brief ${showMore ? 'expanded' : ''}`}>
-                            {(showMore ? talkingLines : talkingLines.slice(0, 2)).map((line, i) => (
-                                <div key={i} className="say-now-line">
-                                    {line}
-                                </div>
                             ))}
                         </div>
-                    )}
-                    {objectionLoading && (
-                        <div className="objection-loading">
-                            <div className="spinner" style={{ width: 18, height: 18 }} />
-                            <span>Thinking…</span>
-                        </div>
-                    )}
-                    {objectionError && (
-                        <div className="objection-error">
-                            {objectionError}
-                        </div>
-                    )}
-                    <div className="ask-next">
-                        <div className="ask-next-label">Ask next</div>
-                        <div className="ask-next-list">
-                            {askNextGenerating ? (
-                                <>
-                                    <div className="ask-next-skeleton" />
-                                    <div className="ask-next-skeleton short" />
-                                </>
-                            ) : questionLines.length > 0 ? (
-                                questionLines.map((question, i) => (
-                                    <div key={i} className="ask-next-line">
-                                        {question}
-                                    </div>
-                                ))
-                            ) : (
-                                <div className="ask-next-empty">Generating questions…</div>
+                        <div className="call-search-results">
+                            {filteredObjections.map((node) => (
+                                <button
+                                    key={node.id}
+                                    className="call-search-item"
+                                    onClick={() => {
+                                        navigateToNode(node.id);
+                                        setShowSearch(false);
+                                    }}
+                                >
+                                    {node.title}
+                                </button>
+                            ))}
+                            {filteredObjections.length === 0 && (
+                                <div className="call-search-empty">No matches.</div>
                             )}
                         </div>
-                        {askNextError && !askNextGenerating && (
-                            <button className="btn btn-secondary btn-sm" onClick={handleAskNextAutogen}>
-                                Generate options
-                            </button>
-                        )}
                     </div>
-                </div>
+                )}
+
+                {isObjectionNode ? (
+                    <div className="objection-card">
+                        <div className="objection-header">
+                            <span className="say-now-label">Objection</span>
+                            <h1 className="current-node-title">{currentNode.title}</h1>
+                        </div>
+                        <div className="objection-primary">{primaryLine}</div>
+                        <div className="objection-actions">
+                            <button className="btn btn-primary" onClick={() => setActivePanel('question')}>
+                                Question
+                            </button>
+                            <button className="btn btn-secondary" onClick={() => setActivePanel('soft')}>
+                                Answer: Soft
+                            </button>
+                            <button className="btn btn-secondary" onClick={() => setActivePanel('direct')}>
+                                Answer: Direct
+                            </button>
+                            <button className="btn btn-secondary" onClick={() => setActivePanel('next')}>
+                                Next Step
+                            </button>
+                        </div>
+                        {activePanelContent && (
+                            <div className="objection-panel">
+                                {activePanelContent}
+                            </div>
+                        )}
+                        <div className="objection-secondary">
+                            {proofLine && (
+                                <button className="tag-chip" onClick={() => setSecondaryReveal('proof')}>
+                                    Proof
+                                </button>
+                            )}
+                            {riskLine && (
+                                <button className="tag-chip" onClick={() => setSecondaryReveal('risk')}>
+                                    Risk
+                                </button>
+                            )}
+                            {challengerLine && (
+                                <button className="tag-chip" onClick={() => setSecondaryReveal('challenger')}>
+                                    Challenger
+                                </button>
+                            )}
+                            <button className="tag-chip" onClick={goBack}>
+                                Exit
+                            </button>
+                        </div>
+                        {secondaryReveal === 'proof' && proofLine && (
+                            <div className="objection-panel secondary">{proofLine}</div>
+                        )}
+                        {secondaryReveal === 'risk' && riskLine && (
+                            <div className="objection-panel secondary">{riskLine}</div>
+                        )}
+                        {secondaryReveal === 'challenger' && challengerLine && (
+                            <div className="objection-panel secondary">{challengerLine}</div>
+                        )}
+                        <div className="emotion-toggle">
+                            {([
+                                { key: 'neutral', label: '😐' },
+                                { key: 'annoyed', label: '😠' },
+                                { key: 'skeptical', label: '🤨' },
+                                { key: 'cold', label: '🧊' },
+                            ] as const).map((item) => (
+                                <button
+                                    key={item.key}
+                                    className={`emotion-chip ${emotion === item.key ? 'active' : ''}`}
+                                    onClick={() => setEmotion(item.key)}
+                                >
+                                    {item.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                ) : (
+                    <div className={`current-node say-now-card ${getSentimentClass(currentNode.sentiment)}`}>
+                        <div className="say-now-header">
+                            <span className="say-now-label">Say this now</span>
+                            <div className="say-now-actions">
+                                {talkingLines.length > 2 && (
+                                    <button
+                                        className="btn btn-secondary btn-sm"
+                                        onClick={() => setShowMore((prev) => !prev)}
+                                    >
+                                        {showMore ? 'Less' : 'More'}
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                        <h1 className="current-node-title">
+                            {currentNode.sentiment && <span style={{ marginRight: 8 }}>{getSentimentEmoji(currentNode.sentiment)}</span>}
+                            {currentNode.title}
+                        </h1>
+                        {talkingLines.length > 0 && (
+                            <div className={`say-now-brief ${showMore ? 'expanded' : ''}`}>
+                                {(showMore ? talkingLines : talkingLines.slice(0, 2)).map((line, i) => (
+                                    <div key={i} className="say-now-line">
+                                        {line}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        <div className="ask-next">
+                            <div className="ask-next-label">Ask next</div>
+                            <div className="ask-next-list">
+                                {questionLines.length > 0 ? (
+                                    questionLines.map((question, i) => (
+                                        <div key={i} className="ask-next-line">
+                                            {question}
+                                        </div>
+                                    ))
+                                ) : (
+                                    <div className="ask-next-empty">No questions saved yet.</div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
 
             </main>
 
@@ -508,19 +557,22 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                         Finish conversation
                     </button>
                 </div>
-                <div className="options-dock-title">THEIR RESPONSE</div>
-                <div className="response-chips">
-                    {(['positive', 'neutral', 'negative'] as NodeSentiment[]).map((sentiment) => (
-                        <button
-                            key={sentiment}
-                            className={`response-chip response-${sentiment}${pendingSentiment === sentiment ? ' is-loading' : ''}${negativePulse && sentiment === 'negative' ? ' pulse' : ''}`}
-                            onClick={() => handleSelectResponse(sentiment)}
-                            disabled={isGeneratingNextMoves && pendingSentiment === sentiment}
-                        >
-                            {sentiment === 'positive' ? 'Positive' : sentiment === 'neutral' ? 'Neutral' : 'Negative'}
-                        </button>
-                    ))}
-                </div>
+                {!isObjectionNode && (
+                    <>
+                        <div className="options-dock-title">THEIR RESPONSE</div>
+                        <div className="response-chips">
+                            {(['positive', 'neutral', 'negative'] as NodeSentiment[]).map((sentiment) => (
+                                <button
+                                    key={sentiment}
+                                    className={`response-chip response-${sentiment}${negativePulse && sentiment === 'negative' ? ' pulse' : ''}`}
+                                    onClick={() => handleSelectResponse(sentiment)}
+                                >
+                                    {sentiment === 'positive' ? 'Positive' : sentiment === 'neutral' ? 'Neutral' : 'Negative'}
+                                </button>
+                            ))}
+                        </div>
+                    </>
+                )}
             </section>
 
             {/* Full tree modal */}
@@ -560,7 +612,7 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                             ...project,
                             callHistory: [...(project.callHistory || []), summary],
                         };
-                        await saveProject(updatedProject);
+                        await saveProject(updatedProject, false);
                         onProjectUpdate?.(updatedProject);
                         setShowFinishModal(false);
                         if (isAuthed) {
@@ -639,29 +691,11 @@ function FinishCallModal({
     const [aiSummary, setAiSummary] = useState('');
     const [userNotes, setUserNotes] = useState('');
     const [outcome, setOutcome] = useState<CallSummary['outcome']>('followup');
-    const [generating, setGenerating] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    const [generating] = useState(false);
 
-    // Generate AI summary on mount
     useEffect(() => {
-        const generate = async () => {
-            try {
-                const summary = await generateCallSummaryAction(
-                    pathTitles,
-                    projectDescription,
-                    getBrowserApiKey() || undefined,
-                    getClientId()
-                );
-                setAiSummary(summary);
-            } catch (e) {
-                setError(e instanceof Error ? e.message : 'Failed to generate summary');
-                setAiSummary('(Could not generate AI summary)');
-            } finally {
-                setGenerating(false);
-            }
-        };
-        generate();
-    }, [pathTitles, projectDescription]);
+        setAiSummary(pathTitles.join(' → '));
+    }, [pathTitles]);
 
     const handleSave = () => {
         const summary: CallSummary = {
@@ -702,20 +736,12 @@ function FinishCallModal({
                     <label style={{ display: 'block', marginBottom: 4, fontWeight: 500, fontSize: '0.9rem' }}>
                         AI Summary
                     </label>
-                    {generating ? (
-                        <div className="flex items-center gap-sm" style={{ padding: 'var(--space-md)' }}>
-                            <div className="spinner" style={{ width: 16, height: 16 }} />
-                            <span className="text-muted">Generating summary...</span>
-                        </div>
-                    ) : (
-                        <textarea
-                            value={aiSummary}
-                            onChange={(e) => setAiSummary(e.target.value)}
-                            rows={4}
-                            style={{ fontSize: '0.9rem' }}
-                        />
-                    )}
-                    {error && <div style={{ color: 'var(--danger)', fontSize: '0.8rem', marginTop: 4 }}>{error}</div>}
+                    <textarea
+                        value={aiSummary}
+                        onChange={(e) => setAiSummary(e.target.value)}
+                        rows={4}
+                        style={{ fontSize: '0.9rem' }}
+                    />
                 </div>
 
                 {/* User Notes */}

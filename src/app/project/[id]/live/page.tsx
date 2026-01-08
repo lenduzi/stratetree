@@ -34,7 +34,7 @@ export default function LiveModePage({ params }: { params: Promise<{ id: string 
 
     const handleProjectUpdate = async (updatedProject: Project) => {
         setProject(updatedProject);
-        await saveProject(updatedProject);
+        await saveProject(updatedProject, false);
     };
 
     if (loading) {
