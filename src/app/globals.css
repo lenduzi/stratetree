@@ -612,7 +612,6 @@ textarea {
   text-overflow: ellipsis;
 }
 
-.focused-view.call-mode .call-title-secondary,
 .focused-view.prep-mode .call-title-secondary {
   font-size: 0.75rem;
   color: var(--text-muted);
@@ -642,11 +641,6 @@ textarea {
   min-height: 44px;
   padding: var(--space-sm) var(--space-md);
   font-size: 0.9rem;
-}
-
-.focused-view.call-mode .call-cta-finish,
-.focused-view.prep-mode .call-cta-finish {
-  display: inline-flex;
 }
 
 .focused-view.call-mode .btn,
@@ -734,6 +728,30 @@ textarea {
 
 .focused-view.call-mode .finish-link:hover {
   color: var(--text-primary);
+}
+
+.focused-view.call-mode .finish-pill-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-sm);
+}
+
+.focused-view.call-mode .finish-pill {
+  border-radius: var(--radius-full);
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--bg-card) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.focused-view.call-mode .finish-pill:hover {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--border-subtle) 90%, transparent);
+  background: color-mix(in srgb, var(--bg-card) 85%, transparent);
 }
 
 .current-node.sentiment-positive {

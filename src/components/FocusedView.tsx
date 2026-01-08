@@ -411,7 +411,6 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                     <span className="call-title-primary">
                         {project.name?.split('—')[0]?.trim() || project.name || 'Conversation'}
                     </span>
-                    <span className="call-title-secondary">{currentNode.title}</span>
                 </div>
                 <div className="call-topbar-actions">
                     {path.length > 1 && (
@@ -427,12 +426,6 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                             onSelect={handlePanicSelect}
                         />
                     </div>
-                    <button
-                        className="btn btn-primary btn-sm call-cta-finish"
-                        onClick={() => setShowFinishModal(true)}
-                    >
-                        ✓ Finish Conversation
-                    </button>
                 </div>
             </header>
 
@@ -507,6 +500,14 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
 
             {/* Next moves dock */}
             <section className="options-dock">
+                <div className="finish-pill-row">
+                    <button
+                        className="finish-pill"
+                        onClick={() => setShowFinishModal(true)}
+                    >
+                        Finish conversation
+                    </button>
+                </div>
                 <div className="options-dock-title">THEIR RESPONSE</div>
                 <div className="response-chips">
                     {(['positive', 'neutral', 'negative'] as NodeSentiment[]).map((sentiment) => (
