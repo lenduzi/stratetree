@@ -20,6 +20,41 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Build Mode vs Conversation Mode
+
+YapMap has two primary modes:
+
+- **Build Mode** (`/app/project/:id/build`): edit the tree, fill objection bundles, run quality checks, and generate objection archetypes.
+- **Conversation Mode** (`/app/project/:id/call`): ultra-minimal UI for live use with no network calls. Everything must be precomputed.
+
+### Call Mode Readiness
+
+Build Mode shows a **Call Mode Ready** indicator that checks:
+- objection bundle completeness + validator score
+- cached locally and offline-ready status
+
+## Objection Bundles
+
+Objection nodes carry a structured bundle with:
+- primary line, diagnose question, soft/direct/challenger responses
+- proof, risk reset, next step, tags
+
+Validation runs automatically and shows blocking errors + warnings.
+
+## Offline + Performance
+
+Conversation Mode is local-first:
+- tree data is cached locally (IndexedDB)
+- call mode navigation uses in-memory indexes for instant switching
+
+## Tests
+
+Run the validator tests:
+
+```bash
+npm run test
+```
+
 ## Supabase Google OAuth Setup
 
 To enable Google login:

@@ -1,4 +1,4 @@
-import { ObjectionBundle, ObjectionQuality, TreeNode } from './types';
+import type { ObjectionBundle, ObjectionQuality, TreeNode } from './types.ts';
 
 const BUZZWORDS = [
     'synergy',
