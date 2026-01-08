@@ -213,6 +213,14 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                     </div>
                 </div>
                 <div className="call-topbar-actions">
+                    <div className="flex gap-sm">
+                        <Link href={`/app/project/${project.id}/build`} className="btn btn-primary btn-sm">
+                            Build
+                        </Link>
+                        <Link href={`/app/project/${project.id}/call`} className="btn btn-secondary btn-sm">
+                            Call
+                        </Link>
+                    </div>
                     <button className="panic-info-btn" aria-label="Help">
                         ?
                     </button>
@@ -518,7 +526,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                 )}
                 <div className="prep-cta-inline">
                     <Link
-                        href={`/app/project/${project.id}/live`}
+                        href={`/app/project/${project.id}/call`}
                         className="btn btn-primary btn-lg w-full"
                     >
                         Start Conversation Mode
@@ -527,7 +535,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             </main>
             <div className="prep-cta-sticky">
                 <Link
-                    href={`/app/project/${project.id}/live`}
+                    href={`/app/project/${project.id}/call`}
                     className="btn btn-primary btn-lg w-full"
                 >
                     Start Conversation Mode
