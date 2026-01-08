@@ -12,19 +12,25 @@ import { ThemeToggle } from '@/components/ThemeProvider';
 import { User } from '@supabase/supabase-js';
 import { getBrowserApiKey } from '@/lib/settings';
 import { CaptureFlow } from '@/components/CaptureFlow';
+import { getGuestProjects, migrateGuestProjectsToAccount, setGuestProjects } from '@/lib/guest';
+import { v4 as uuidv4 } from 'uuid';
 
 export default function HomePage() {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [guestProjects, setGuestProjectsState] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewModal, setShowNewModal] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(false);
   const [user, setUser] = useState<User | null>(null);
+  const [signOutMessage, setSignOutMessage] = useState(false);
+  const [migrationToast, setMigrationToast] = useState(false);
 
   useEffect(() => {
     checkUser();
     loadProjects();
     checkApiKey();
+    loadGuestProjects();
   }, []);
 
   const checkApiKey = async () => {
@@ -51,6 +57,43 @@ export default function HomePage() {
     if (user) {
       syncCloudToLocal();
       syncPendingSummary();
+      await migrateGuests(user.id);
+    }
+  };
+
+  const loadGuestProjects = () => {
+    const projects = getGuestProjects();
+    setGuestProjectsState(projects);
+  };
+
+  const ensureClientId = async (project: Project, sync = false) => {
+    if (!project.client_id) {
+      project.client_id = uuidv4();
+      await saveProject(project, sync);
+    }
+    return project;
+  };
+
+  const migrateGuests = async (userId: string) => {
+    if (!supabase?.auth) return;
+    try {
+      console.log('[guest] attempting migration');
+      const migratedCount = await migrateGuestProjectsToAccount(userId, async (rows) => {
+        const { error } = await supabase
+          .from('projects')
+          .upsert(rows, { onConflict: 'user_id,client_id' });
+        if (error) throw error;
+      });
+      if (migratedCount > 0) {
+        console.log('[guest] migrated', migratedCount);
+        setMigrationToast(true);
+        loadProjects();
+        setGuestProjects([]);
+        setGuestProjectsState([]);
+        window.setTimeout(() => setMigrationToast(false), 1200);
+      }
+    } catch (e) {
+      console.warn('Guest migration failed', e);
     }
   };
 
@@ -86,7 +129,8 @@ export default function HomePage() {
   const loadProjects = async () => {
     try {
       const data = await getAllProjects();
-      setProjects(data);
+      const normalized = await Promise.all(data.map((project) => ensureClientId(project, !!user)));
+      setProjects(normalized);
     } catch (e) {
       console.error('Failed to load projects:', e);
     } finally {
@@ -131,8 +175,35 @@ export default function HomePage() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setUser(null);
-    router.refresh();
+    setSignOutMessage(true);
+    window.setTimeout(() => {
+      router.replace('/');
+      router.refresh();
+    }, 600);
   };
+
+  const handleGuestGoogle = async () => {
+    if (!supabase?.auth) return;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('yapmap-auth-redirect', '/app');
+    }
+    const origin = window.location.origin;
+    await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${origin}/auth/callback`,
+      },
+    });
+  };
+
+  const logoutLabel = (() => {
+    const fullName = user?.user_metadata?.full_name || user?.user_metadata?.name;
+    if (typeof fullName === 'string' && fullName.trim()) {
+      const first = fullName.trim().split(/\s+/)[0];
+      return `Log out (${first})`;
+    }
+    return 'Log out';
+  })();
 
   return (
     <div className="focused-view">
@@ -153,10 +224,10 @@ export default function HomePage() {
           </Link>
           {user ? (
             <button className="btn btn-secondary btn-sm header-action" onClick={handleLogout}>
-              Logout ({user.email?.split('@')[0]})
+              {logoutLabel}
             </button>
           ) : (
-            <Link href="/app/login" className="btn btn-primary btn-sm header-action">
+            <Link href="/login?redirect=/app" className="btn btn-primary btn-sm header-action">
               Sign In
             </Link>
           )}
@@ -165,6 +236,41 @@ export default function HomePage() {
       </header>
 
       <main className="container">
+        {signOutMessage && (
+          <div className="card mb-lg" style={{ padding: 'var(--space-sm)', textAlign: 'center' }}>
+            <span className="text-muted">Signed out</span>
+          </div>
+        )}
+        {migrationToast && (
+          <div className="card mb-lg" style={{ padding: 'var(--space-sm)', textAlign: 'center' }}>
+            <span className="text-muted">✅ Imported your guest YapMap to your free account.</span>
+          </div>
+        )}
+        {!user && guestProjects.length > 0 && (
+          <div className="card mb-lg">
+            <strong>Guest mode</strong>
+            <p className="text-muted" style={{ marginBottom: 'var(--space-sm)' }}>
+              This YapMap is saved locally on this device only. Create a free account to sync and save more.
+            </p>
+            <div className="flex flex-col gap-sm">
+              <button className="btn btn-google w-full" onClick={handleGuestGoogle}>
+                <span className="google-icon" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 48 48" role="img" focusable="false">
+                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.9-6.9C35.86 2.7 30.28 0 24 0 14.62 0 6.51 5.38 2.56 13.22l8.12 6.3C12.6 13.09 17.86 9.5 24 9.5z"/>
+                    <path fill="#4285F4" d="M46.5 24.5c0-1.57-.15-3.08-.41-4.5H24v9h12.66c-.55 2.96-2.2 5.46-4.66 7.14l7.44 5.77c4.35-4.01 6.86-9.92 6.86-17.41z"/>
+                    <path fill="#FBBC05" d="M10.68 28.52c-.48-1.45-.76-3-.76-4.52s.28-3.07.76-4.52l-8.12-6.3C.92 16.47 0 20.13 0 24s.92 7.53 2.56 10.82l8.12-6.3z"/>
+                    <path fill="#34A853" d="M24 48c6.28 0 11.56-2.07 15.41-5.59l-7.44-5.77c-2.07 1.39-4.72 2.21-7.97 2.21-6.14 0-11.4-3.59-13.32-8.52l-8.12 6.3C6.51 42.62 14.62 48 24 48z"/>
+                    <path fill="none" d="M0 0h48v48H0z"/>
+                  </svg>
+                </span>
+                <span>Continue with Google</span>
+              </button>
+              <Link href="/login?redirect=/app" className="btn btn-secondary w-full">
+                Continue with email
+              </Link>
+            </div>
+          </div>
+        )}
         <div className="flex items-center justify-between mb-lg project-hero">
           <div>
             <h1>Your Strategy Trees</h1>
@@ -206,7 +312,7 @@ export default function HomePage() {
           <div className="loading">
             <div className="spinner" />
           </div>
-        ) : projects.length === 0 ? (
+        ) : (user ? projects : guestProjects).length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">🌱</div>
             <div className="empty-state-title">Prepare your first conversation</div>
@@ -220,7 +326,7 @@ export default function HomePage() {
           </div>
         ) : (
           <div className="project-grid">
-            {projects.map((project) => (
+            {(user ? projects : guestProjects).slice(0, 1).map((project) => (
               <div key={project.id} className="project-card">
                 <Link
                   href={`/app/project/${project.id}`}

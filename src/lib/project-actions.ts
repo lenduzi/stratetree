@@ -22,6 +22,7 @@ export async function getCloudProjects(): Promise<Project[]> {
 
     return (data || []).map((p: any) => ({
         id: p.id,
+        client_id: p.client_id,
         name: p.name,
         description: p.description,
         rootNode: p.root_node,
@@ -42,11 +43,14 @@ export async function saveCloudProject(project: Project): Promise<void> {
         .upsert({
             id: project.id,
             user_id: user.id,
+            client_id: project.client_id,
             name: project.name,
             description: project.description,
             root_node: project.rootNode,
             call_history: project.callHistory || [],
             updated_at: new Date().toISOString(),
+        }, {
+            onConflict: 'user_id,client_id',
         });
 
     if (error) {

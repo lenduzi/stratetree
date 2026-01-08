@@ -10,11 +10,6 @@ export async function middleware(request: NextRequest) {
     })
 
     const pathname = request.nextUrl.pathname;
-    if (pathname.startsWith('/app/')) {
-        const url = request.nextUrl.clone();
-        url.pathname = pathname.replace(/^\/app/, '') || '/';
-        return NextResponse.rewrite(url);
-    }
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;

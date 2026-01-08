@@ -53,6 +53,9 @@ const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
 
 const REQUIRED_SENTIMENTS: NodeSentiment[] = ['positive', 'neutral', 'negative'];
+const LETTER_SPACE_LETTER = /\p{L}+\s+\p{L}+/u;
+
+type CaptureValidationResult = { ok: true } | { ok: false; reason: 'need_more_context' };
 
 const NodeSchema: z.ZodType<any> = z.object({
     id: z.string().optional(),
@@ -177,6 +180,70 @@ function toStringArray(value: unknown): string[] {
         return value.split(',').map((item) => item.trim()).filter(Boolean);
     }
     return [];
+}
+
+function countWordishTokens(text: string): number {
+    return text
+        .split(/\s+/)
+        .filter((token) => /\p{L}{2,}/u.test(token))
+        .length;
+}
+
+function getMaxConsonantRun(text: string): number {
+    let maxRun = 0;
+    let currentRun = 0;
+    const lower = text.toLowerCase();
+    for (const char of lower) {
+        if (/[a-z]/.test(char)) {
+            if (/[aeiou]/.test(char)) {
+                currentRun = 0;
+            } else {
+                currentRun += 1;
+                maxRun = Math.max(maxRun, currentRun);
+            }
+        } else {
+            currentRun = 0;
+        }
+    }
+    return maxRun;
+}
+
+function validateCaptureInput(
+    text: string,
+    voiceUsed?: boolean,
+    transcript?: string
+): CaptureValidationResult {
+    const trimmed = text.trim();
+    const transcriptTrim = (transcript || '').trim();
+    if (!trimmed) return { ok: false, reason: 'need_more_context' };
+    if (voiceUsed && transcriptTrim.length < 8) return { ok: false, reason: 'need_more_context' };
+
+    const wordishTokens = countWordishTokens(trimmed);
+    const passes =
+        (trimmed.length >= 12 && wordishTokens >= 2) ||
+        LETTER_SPACE_LETTER.test(trimmed) ||
+        transcriptTrim.length >= 8;
+    if (!passes) return { ok: false, reason: 'need_more_context' };
+
+    const latinLetters = (trimmed.match(/[a-z]/gi) || []).length;
+    if (latinLetters >= 12 && wordishTokens <= 2) {
+        const vowels = (trimmed.match(/[aeiou]/gi) || []).length;
+        const vowelRatio = latinLetters ? vowels / latinLetters : 0;
+        const maxConsonantRun = getMaxConsonantRun(trimmed);
+        if (maxConsonantRun >= 7 || vowelRatio < 0.2) {
+            return { ok: false, reason: 'need_more_context' };
+        }
+    }
+
+    return { ok: true };
+}
+
+export async function validateCaptureAction(
+    text: string,
+    voiceUsed?: boolean,
+    transcript?: string
+): Promise<CaptureValidationResult> {
+    return validateCaptureInput(text, voiceUsed, transcript);
 }
 
 function normalizeObjections(input: unknown): string[] {
@@ -689,8 +756,16 @@ export async function generateScenarioObjectionsAction(
 export async function generateProjectBundleAction(
     capture: string,
     userApiKey?: string,
-    clientId?: string
-): Promise<{ buckets: StructuredBuckets; tree: TreeNode; router: ScenarioRouterResult; objectionHandlers: Record<string, TreeNode> }> {
+    clientId?: string,
+    validationMeta?: { voiceUsed?: boolean; transcript?: string }
+): Promise<
+    | { ok: false; reason: 'need_more_context' }
+    | { ok: true; buckets: StructuredBuckets; tree: TreeNode; router: ScenarioRouterResult; objectionHandlers: Record<string, TreeNode> }
+> {
+    const validation = validateCaptureInput(capture, validationMeta?.voiceUsed, validationMeta?.transcript);
+    if (!validation.ok) {
+        return validation;
+    }
     await enforceRateLimit(clientId);
     const client = getOpenAIClient(userApiKey);
     const start = Date.now();
@@ -813,6 +888,7 @@ Return JSON with keys:
     const normalized = normalizeBundle(parsed, capture, objections, objectionsFallback);
     console.log('[generateProjectBundleAction] total_ms', Date.now() - start);
     return {
+        ok: true,
         buckets: normalized.buckets,
         tree: normalized.tree,
         router: normalized.router,
@@ -1005,14 +1081,22 @@ Keep it brief, calm, and actionable.`;
 export async function structureProjectAction(
     capture: string,
     userApiKey?: string,
-    clientId?: string
-): Promise<{ buckets: StructuredBuckets; tree: TreeNode; router: ScenarioRouterResult; objectionHandlers: Record<string, TreeNode> }> {
+    clientId?: string,
+    validationMeta?: { voiceUsed?: boolean; transcript?: string }
+): Promise<
+    | { ok: false; reason: 'need_more_context' }
+    | { ok: true; buckets: StructuredBuckets; tree: TreeNode; router: ScenarioRouterResult; objectionHandlers: Record<string, TreeNode> }
+> {
+    const validation = validateCaptureInput(capture, validationMeta?.voiceUsed, validationMeta?.transcript);
+    if (!validation.ok) {
+        return validation;
+    }
     await enforceRateLimit(clientId);
     const router = await routeScenarioAction(capture, userApiKey, clientId);
     const buckets = await extractStructuredBuckets(capture, userApiKey, router);
     const tree = await generateTreeFromBuckets(buckets, userApiKey, router);
     const objectionHandlers = await generateObjectionHandlersAction(router, buckets, userApiKey, clientId);
-    return { buckets, tree, router, objectionHandlers };
+    return { ok: true, buckets, tree, router, objectionHandlers };
 }
 
 export async function regenerateBucketAction(

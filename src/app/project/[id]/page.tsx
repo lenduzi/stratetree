@@ -196,58 +196,28 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     const hasOptional = optionalBuckets.some((bucket) => structured?.[bucket.key]);
 
     return (
-        <div className="focused-view">
-            <header className="header project-header">
-                <div className="flex items-center gap-md project-header-main">
-                    <Link href="/app" className="btn btn-secondary btn-sm">
+        <div className="focused-view prep-mode">
+            <header className="header call-topbar">
+                <div className="call-topbar-left">
+                    <Link href="/app" className="btn btn-secondary btn-sm call-back-btn">
                         ← Back
                     </Link>
-                    <div>
-                        <h1 className="project-title" style={{ fontSize: '1.1rem', margin: 0 }}>{project.name}</h1>
-                        <div className="text-muted" style={{ fontSize: '0.8rem' }}>
-                            Preparation Mode
-                        </div>
+                    <div className="call-topbar-title">
+                        <span className="call-title-primary">
+                            {project.name?.split('—')[0]?.trim() || project.name || 'Conversation'}
+                        </span>
+                        <span className="call-title-secondary">Preparation mode</span>
                     </div>
                 </div>
-                <div className="flex items-center gap-sm project-header-actions">
-                    <span className="project-theme-toggle">
-                        <ThemeToggle />
-                    </span>
-                    {isStructured ? (
-                        <Link
-                            href={`/app/project/${project.id}/live`}
-                            className="btn btn-primary btn-lg project-start"
-                        >
-                            ▶ Start Conversation Mode
-                        </Link>
-                    ) : (
-                        <>
-                            <button
-                                className="btn btn-secondary project-generate"
-                                onClick={handleGenerateClick}
-                                disabled={generating}
-                            >
-                                {generating ? (
-                                    <>
-                                        <span className="spinner" style={{ width: 16, height: 16 }} />
-                                        Generating...
-                                    </>
-                                ) : (
-                                    '✨ Generate with AI'
-                                )}
-                            </button>
-                            <Link
-                                href={`/app/project/${project.id}/live`}
-                                className="btn btn-primary btn-lg project-start"
-                            >
-                                ▶ Start Conversation Mode
-                            </Link>
-                        </>
-                    )}
+                <div className="call-topbar-actions">
+                    <button className="panic-info-btn" aria-label="Help">
+                        ?
+                    </button>
                 </div>
             </header>
 
             <main className="container">
+                <div className="prep-cta-spacer" />
                 {(error || (!isServerConfigured && !getBrowserApiKey())) && (
                     <div
                         className="card mb-lg"
@@ -347,12 +317,22 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
                         {hasOptional && (
                             <div className="overview-optional">
-                                <button
-                                    className="btn btn-secondary btn-sm"
-                                    onClick={() => setShowOptional((prev) => !prev)}
-                                >
-                                    {showOptional ? 'Hide details' : 'Show details'}
-                                </button>
+                                <div className="prep-toggle-row">
+                                    <button
+                                        className="btn btn-secondary btn-sm"
+                                        onClick={() => setShowOptional((prev) => !prev)}
+                                    >
+                                        {showOptional ? 'Hide details' : 'Show details'}
+                                    </button>
+                                    {structured?.rawCapture && (
+                                        <button
+                                            className="btn btn-secondary btn-sm"
+                                            onClick={() => setShowRawCapture((prev) => !prev)}
+                                        >
+                                            {showRawCapture ? 'Hide raw capture' : 'Show raw capture'}
+                                        </button>
+                                    )}
+                                </div>
                                 {showOptional && (
                                     <div className="overview-buckets mt-md">
                                         {optionalBuckets.map(({ key, label }) => (
@@ -399,24 +379,32 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                             </div>
                         )}
 
-                        {structured?.rawCapture && (
+                        {structured?.rawCapture && showRawCapture && (
                             <div className="overview-raw mt-lg">
-                                <button
-                                    className="btn btn-secondary btn-sm"
-                                    onClick={() => setShowRawCapture((prev) => !prev)}
-                                >
-                                    {showRawCapture ? 'Hide raw capture' : 'Show raw capture'}
-                                </button>
-                                {showRawCapture && (
-                                    <div className="card mt-md">
-                                        <div className="bucket-body">{structured.rawCapture}</div>
-                                    </div>
-                                )}
+                                <div className="card mt-md">
+                                    <div className="bucket-body">{structured.rawCapture}</div>
+                                </div>
                             </div>
                         )}
                     </div>
                 ) : (
                     <>
+                        <div className="prep-actions">
+                            <button
+                                className="btn btn-secondary project-generate"
+                                onClick={handleGenerateClick}
+                                disabled={generating}
+                            >
+                                {generating ? (
+                                    <>
+                                        <span className="spinner" style={{ width: 16, height: 16 }} />
+                                        Generating...
+                                    </>
+                                ) : (
+                                    '✨ Generate with AI'
+                                )}
+                            </button>
+                        </div>
                         {project.description && (
                             <div className="card mb-lg">
                                 <h3 style={{ marginBottom: 'var(--space-sm)', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
@@ -506,7 +494,23 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                         </div>
                     </div>
                 )}
+                <div className="prep-cta-inline">
+                    <Link
+                        href={`/app/project/${project.id}/live`}
+                        className="btn btn-primary btn-lg w-full"
+                    >
+                        Start Conversation Mode
+                    </Link>
+                </div>
             </main>
+            <div className="prep-cta-sticky">
+                <Link
+                    href={`/app/project/${project.id}/live`}
+                    className="btn btn-primary btn-lg w-full"
+                >
+                    Start Conversation Mode
+                </Link>
+            </div>
             {showConfirmGen && (
                 <div className="modal-overlay" onClick={() => setShowConfirmGen(false)}>
                     <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 450 }}>

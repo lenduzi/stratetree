@@ -1,4 +1,5 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
+import { v4 as uuidv4 } from 'uuid';
 import { Project } from './types';
 import { saveCloudProject, deleteCloudProject } from './project-actions';
 
@@ -50,6 +51,9 @@ export async function getProject(id: string): Promise<Project | undefined> {
 export async function saveProject(project: Project, syncToCloud = true): Promise<void> {
     const db = await getDB();
     project.updatedAt = Date.now();
+    if (!project.client_id) {
+        project.client_id = uuidv4();
+    }
     await db.put('projects', project);
 
     if (syncToCloud) {

@@ -13,6 +13,7 @@ export interface TreeNode {
 
 export interface Project {
     id: string;
+    client_id?: string;
     name: string;
     description: string;       // Context for AI generation
     rootNode: TreeNode;

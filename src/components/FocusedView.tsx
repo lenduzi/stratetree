@@ -12,6 +12,7 @@ import { getSentimentClass, getSentimentEmoji } from './NodeCard';
 import { getBrowserApiKey } from '@/lib/settings';
 import { getClientId } from '@/lib/client-id';
 import { supabase } from '@/lib/supabase';
+import { upsertGuestProject } from '@/lib/guest';
 
 interface FocusedViewProps {
     project: Project;
@@ -27,7 +28,6 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
     const [showMore, setShowMore] = useState(false);
     const [lastMoveLabel, setLastMoveLabel] = useState<string | null>(null);
     const [lastSelectedSentiment, setLastSelectedSentiment] = useState<TreeNode['sentiment'] | null>(null);
-    const [showSaveNudge, setShowSaveNudge] = useState(false);
     const [isAuthed, setIsAuthed] = useState<boolean | null>(null);
     const [isGeneratingNextMoves, setIsGeneratingNextMoves] = useState(false);
     const [showPanicHelp, setShowPanicHelp] = useState(false);
@@ -40,6 +40,7 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
     const [negativePulse, setNegativePulse] = useState(false);
     const [objectionLoading, setObjectionLoading] = useState(false);
     const [objectionError, setObjectionError] = useState<string | null>(null);
+    const [guestPromptOpen, setGuestPromptOpen] = useState(false);
 
     const currentNode = findNodeById(project.rootNode, currentNodeId) || project.rootNode;
     const childList = Array.isArray(currentNode.children) ? currentNode.children : [];
@@ -332,6 +333,20 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
         }
     };
 
+    const handleGuestGoogle = async () => {
+        if (!supabase?.auth) return;
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('yapmap-auth-redirect', '/app');
+        }
+        const origin = window.location.origin;
+        await supabase.auth.signInWithOAuth({
+            provider: 'google',
+            options: {
+                redirectTo: `${origin}/auth/callback`,
+            },
+        });
+    };
+
     const handleAskNextAutogen = useCallback(async () => {
         const now = Date.now();
         const last = lastGeneratedAtRef.current[currentNodeId] || 0;
@@ -565,34 +580,50 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                             router.push('/app');
                             return;
                         }
+                        upsertGuestProject(updatedProject);
                         if (typeof window !== 'undefined') {
                             localStorage.setItem('yapmap-pending-summary', JSON.stringify({
                                 projectId: project.id,
                                 summaryId: summary.id,
                             }));
                         }
-                        setShowSaveNudge(true);
+                        setGuestPromptOpen(true);
                     }}
                 />
             )}
 
-            {showSaveNudge && (
+            {guestPromptOpen && (
                 <div className="modal-overlay" onClick={() => {
-                    setShowSaveNudge(false);
+                    setGuestPromptOpen(false);
                     router.push('/app');
                 }}>
                     <div className="modal" onClick={(e) => e.stopPropagation()}>
-                        <h2 className="modal-title">Save this YapMap?</h2>
-                        <p className="text-muted">Signing up is free. Save outcome + notes • Reuse later • Create more</p>
-                        <div className="modal-actions">
-                            <button className="btn btn-secondary" onClick={() => {
-                                setShowSaveNudge(false);
+                        <h2 className="modal-title">Save & sync your YapMap</h2>
+                        <p className="text-muted">Signing up is completely free. Keep this YapMap and unlock unlimited maps + sync.</p>
+                        <div className="guest-auth-actions">
+                            <button className="btn btn-google w-full" onClick={handleGuestGoogle}>
+                                <span className="google-icon" aria-hidden="true">
+                                    <svg width="20" height="20" viewBox="0 0 48 48" role="img" focusable="false">
+                                        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.9-6.9C35.86 2.7 30.28 0 24 0 14.62 0 6.51 5.38 2.56 13.22l8.12 6.3C12.6 13.09 17.86 9.5 24 9.5z"/>
+                                        <path fill="#4285F4" d="M46.5 24.5c0-1.57-.15-3.08-.41-4.5H24v9h12.66c-.55 2.96-2.2 5.46-4.66 7.14l7.44 5.77c4.35-4.01 6.86-9.92 6.86-17.41z"/>
+                                        <path fill="#FBBC05" d="M10.68 28.52c-.48-1.45-.76-3-.76-4.52s.28-3.07.76-4.52l-8.12-6.3C.92 16.47 0 20.13 0 24s.92 7.53 2.56 10.82l8.12-6.3z"/>
+                                        <path fill="#34A853" d="M24 48c6.28 0 11.56-2.07 15.41-5.59l-7.44-5.77c-2.07 1.39-4.72 2.21-7.97 2.21-6.14 0-11.4-3.59-13.32-8.52l-8.12 6.3C6.51 42.62 14.62 48 24 48z"/>
+                                        <path fill="none" d="M0 0h48v48H0z"/>
+                                    </svg>
+                                </span>
+                                <span>Continue with Google</span>
+                            </button>
+                            <button className="btn btn-secondary w-full" onClick={() => router.push('/login?redirect=/app')}>
+                                Continue with email
+                            </button>
+                            <div className="login-divider">
+                                <span>or continue as guest</span>
+                            </div>
+                            <button className="btn btn-secondary w-full" onClick={() => {
+                                setGuestPromptOpen(false);
                                 router.push('/app');
                             }}>
-                                Not now
-                            </button>
-                            <button className="btn btn-primary" onClick={() => router.push('/app/login')}>
-                                Sign up to save
+                                Continue as guest
                             </button>
                         </div>
                     </div>
