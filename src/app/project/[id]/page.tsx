@@ -12,6 +12,8 @@ import { ThemeToggle } from '@/components/ThemeProvider';
 import { getBrowserApiKey } from '@/lib/settings';
 import { getClientId } from '@/lib/client-id';
 import { summarizeObjectionQuality } from '@/lib/objection-validator';
+import { OBJECTION_ARCHETYPES, applyHardMode, buildObjectionNode, suggestTopArchetypes } from '@/lib/objection-archetypes';
+import { addChildToNode } from '@/lib/hooks';
 
 type EditableBucketKey = Exclude<keyof StructuredBuckets, 'router' | 'rawCapture' | 'objectionHandlers'>;
 
@@ -29,6 +31,8 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     const [bucketLoading, setBucketLoading] = useState<Record<string, boolean>>({});
     const [showOptional, setShowOptional] = useState(false);
     const [showRawCapture, setShowRawCapture] = useState(false);
+    const [selectedArchetypes, setSelectedArchetypes] = useState<string[]>([]);
+    const [showArchetypes, setShowArchetypes] = useState(false);
 
     useEffect(() => {
         loadProject();
@@ -39,6 +43,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
             const data = await getProject(id);
             if (data) {
                 setProject(data);
+                setSelectedArchetypes(data.structured?.selectedArchetypes || []);
             } else {
                 setError('Project not found');
             }
@@ -56,6 +61,13 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         const updated = { ...project, rootNode: newRoot };
         setProject(updated);
         await saveProject(updated);
+    };
+
+    const updateStructured = async (nextStructured: StructuredBuckets) => {
+        if (!project) return;
+        const nextProject = { ...project, structured: nextStructured };
+        setProject(nextProject);
+        await saveProject(nextProject);
     };
 
     const handleGenerateClick = () => {
@@ -197,6 +209,50 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     const hasOptional = optionalBuckets.some((bucket) => structured?.[bucket.key]);
     const objectionSummary = summarizeObjectionQuality(project.rootNode);
     const callModeReady = objectionSummary.total > 0 && objectionSummary.blocking === 0;
+    const intake = structured?.intake || {};
+    const suggestedArchetypes = suggestTopArchetypes({ capture: structured?.rawCapture || project.description, intake });
+    const activeArchetypes = showArchetypes ? OBJECTION_ARCHETYPES : suggestedArchetypes;
+
+    const toggleArchetype = (key: string) => {
+        setSelectedArchetypes((prev) => {
+            const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+            updateStructured({
+                ...(project?.structured || structured)!,
+                selectedArchetypes: next,
+            });
+            return next;
+        });
+    };
+
+    const applyArchetypes = async () => {
+        if (!project) return;
+        let updatedRoot = project.rootNode;
+        const existingTitles = new Set(project.rootNode.children.map((child) => child.title.toLowerCase()));
+        selectedArchetypes.forEach((key) => {
+            const arch = OBJECTION_ARCHETYPES.find((item) => item.key === key);
+            if (!arch) return;
+            if (existingTitles.has(arch.label.toLowerCase())) return;
+            const node = buildObjectionNode(arch);
+            updatedRoot = addChildToNode(updatedRoot, project.rootNode.id, node);
+        });
+        const updated = { ...project, rootNode: updatedRoot };
+        setProject(updated);
+        await saveProject(updated);
+    };
+
+    const applyHardModeToTree = async () => {
+        if (!project) return;
+        const walk = (node: TreeNode): TreeNode => {
+            const updated = node.type === 'objection' && node.objectionBundle
+                ? { ...node, objectionBundle: applyHardMode(node.objectionBundle) }
+                : node;
+            return { ...updated, children: updated.children.map(walk) };
+        };
+        const updatedRoot = walk(project.rootNode);
+        const updated = { ...project, rootNode: updatedRoot };
+        setProject(updated);
+        await saveProject(updated);
+    };
 
     return (
         <div className="focused-view prep-mode">
@@ -275,6 +331,114 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
 
                 {isStructured ? (
                     <div className="overview">
+                        <div className="card mb-lg" style={{ padding: 'var(--space-lg)' }}>
+                            <div style={{ fontWeight: 600, marginBottom: 8 }}>Interview intake</div>
+                            <div className="grid" style={{ gap: 'var(--space-sm)' }}>
+                                <div>
+                                    <div className="text-muted" style={{ fontSize: '0.8rem', marginBottom: 6 }}>Conversation type</div>
+                                    <div className="flex gap-sm" style={{ flexWrap: 'wrap' }}>
+                                        {['deal', 'feedback', 'price', 'conflict', 'performance'].map((value) => (
+                                            <button
+                                                key={value}
+                                                className="btn btn-secondary btn-sm"
+                                                style={{ background: intake.conversationType === value ? 'var(--accent-soft)' : undefined }}
+                                                onClick={() => updateStructured({
+                                                    ...structured!,
+                                                    intake: { ...intake, conversationType: value },
+                                                })}
+                                            >
+                                                {value}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-muted" style={{ fontSize: '0.8rem', marginBottom: 6 }}>Counterpart</div>
+                                    <div className="flex gap-sm" style={{ flexWrap: 'wrap' }}>
+                                        {['boss', 'client', 'partner', 'friend', 'employee'].map((value) => (
+                                            <button
+                                                key={value}
+                                                className="btn btn-secondary btn-sm"
+                                                style={{ background: intake.counterpart === value ? 'var(--accent-soft)' : undefined }}
+                                                onClick={() => updateStructured({
+                                                    ...structured!,
+                                                    intake: { ...intake, counterpart: value },
+                                                })}
+                                            >
+                                                {value}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-muted" style={{ fontSize: '0.8rem', marginBottom: 6 }}>Goal</div>
+                                    <div className="flex gap-sm" style={{ flexWrap: 'wrap' }}>
+                                        {['get yes', 'clarify scope', 'clean no', 'repair relationship'].map((value) => (
+                                            <button
+                                                key={value}
+                                                className="btn btn-secondary btn-sm"
+                                                style={{ background: intake.goalType === value ? 'var(--accent-soft)' : undefined }}
+                                                onClick={() => updateStructured({
+                                                    ...structured!,
+                                                    intake: { ...intake, goalType: value },
+                                                })}
+                                            >
+                                                {value}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div className="text-muted" style={{ fontSize: '0.8rem', marginBottom: 6 }}>Sensitive area</div>
+                                    <div className="flex gap-sm" style={{ flexWrap: 'wrap' }}>
+                                        {['budget', 'time', 'risk', 'trust', 'brand', 'control', 'politics'].map((value) => (
+                                            <button
+                                                key={value}
+                                                className="btn btn-secondary btn-sm"
+                                                style={{ background: intake.sensitiveArea === value ? 'var(--accent-soft)' : undefined }}
+                                                onClick={() => updateStructured({
+                                                    ...structured!,
+                                                    intake: { ...intake, sensitiveArea: value },
+                                                })}
+                                            >
+                                                {value}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="card mb-lg" style={{ padding: 'var(--space-lg)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                <div style={{ fontWeight: 600 }}>Objection archetypes (Top 8)</div>
+                                <button className="btn btn-secondary btn-sm" onClick={() => setShowArchetypes((prev) => !prev)}>
+                                    {showArchetypes ? 'Show suggested' : 'Show all'}
+                                </button>
+                            </div>
+                            <div className="flex gap-sm" style={{ flexWrap: 'wrap' }}>
+                                {activeArchetypes.map((arch) => (
+                                    <button
+                                        key={arch.key}
+                                        className="btn btn-secondary btn-sm"
+                                        style={{
+                                            background: selectedArchetypes.includes(arch.key) ? 'var(--accent-soft)' : undefined,
+                                        }}
+                                        onClick={() => toggleArchetype(arch.key)}
+                                    >
+                                        {arch.label}
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="flex gap-sm" style={{ marginTop: 'var(--space-md)' }}>
+                                <button className="btn btn-primary btn-sm" onClick={applyArchetypes}>
+                                    Generate objection nodes
+                                </button>
+                                <button className="btn btn-secondary btn-sm" onClick={applyHardModeToTree}>
+                                    Make it hard
+                                </button>
+                            </div>
+                        </div>
                         <div className="overview-title">
                             {editingKey === 'title' ? (
                                 <input
@@ -338,7 +502,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                                         />
                                     ) : (
                                         <div className={`bucket-body${isBucketLoading(key) ? ' is-loading' : ''}`}>
-                                            {structured?.[key] || '—'}
+                                            {typeof structured?.[key] === 'string' ? structured?.[key] : '—'}
                                         </div>
                                     )}
                                 </div>
@@ -398,7 +562,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                                                         />
                                                     ) : (
                                                         <div className={`bucket-body${isBucketLoading(key) ? ' is-loading' : ''}`}>
-                                                            {structured[key]}
+                                                            {typeof structured[key] === 'string' ? structured[key] : '—'}
                                                         </div>
                                                     )}
                                                 </div>

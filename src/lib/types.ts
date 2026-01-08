@@ -86,6 +86,13 @@ export interface StructuredBuckets {
     objections?: string[];
     objectionsFallback?: boolean;
     objectionHandlers?: Record<string, TreeNode>;
+    intake?: {
+        conversationType?: string;
+        counterpart?: string;
+        goalType?: string;
+        sensitiveArea?: string;
+    };
+    selectedArchetypes?: string[];
 }
 
 export type ScenarioType =
