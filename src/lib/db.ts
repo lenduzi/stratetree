@@ -57,6 +57,7 @@ function normalizeNode(raw: any): TreeNode {
         sentiment: raw?.sentiment,
         type,
         objectionBundle,
+        objectionQuality: raw?.objectionQuality,
         children: normalizedChildren,
     };
 }

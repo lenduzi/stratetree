@@ -11,6 +11,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ThemeToggle } from '@/components/ThemeProvider';
 import { getBrowserApiKey } from '@/lib/settings';
 import { getClientId } from '@/lib/client-id';
+import { summarizeObjectionQuality } from '@/lib/objection-validator';
 
 type EditableBucketKey = Exclude<keyof StructuredBuckets, 'router' | 'rawCapture' | 'objectionHandlers'>;
 
@@ -194,6 +195,8 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         { key: 'tone', label: 'Tone' },
     ];
     const hasOptional = optionalBuckets.some((bucket) => structured?.[bucket.key]);
+    const objectionSummary = summarizeObjectionQuality(project.rootNode);
+    const callModeReady = objectionSummary.total > 0 && objectionSummary.blocking === 0;
 
     return (
         <div className="focused-view prep-mode">
@@ -242,6 +245,25 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                         </div>
                     </div>
                 )}
+
+                <div
+                    className="card mb-lg"
+                    style={{
+                        borderColor: callModeReady ? 'var(--success)' : 'var(--warning)',
+                        background: callModeReady ? 'var(--success-bg)' : 'var(--warning-bg)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 'var(--space-md)'
+                    }}
+                >
+                    <span style={{ fontSize: '1.2rem' }}>{callModeReady ? '✅' : '⚠️'}</span>
+                    <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>Call Mode Ready</div>
+                        <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                            Objection nodes: {objectionSummary.total || 0} • Blocking issues: {objectionSummary.blocking} • Warnings: {objectionSummary.warnings} • Avg score: {objectionSummary.averageScore || 0}
+                        </div>
+                    </div>
+                </div>
 
                 {isStructured ? (
                     <div className="overview">

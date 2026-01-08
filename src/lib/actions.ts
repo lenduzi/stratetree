@@ -3,8 +3,9 @@
 import OpenAI from 'openai';
 import { z } from 'zod';
 import { headers } from 'next/headers';
-import { TreeNode, CallSummary, StructuredBuckets, ScenarioRouterResult, ScenarioType, ScenarioCategory, NodeSentiment } from './types';
+import { TreeNode, CallSummary, StructuredBuckets, ScenarioRouterResult, ScenarioType, ScenarioCategory, NodeSentiment, ObjectionBundle } from './types';
 import { v4 as uuidv4 } from 'uuid';
+import { validateObjectionBundle } from './objection-validator';
 
 function toStringArraySafe(value: unknown): string[] {
     if (Array.isArray(value)) {
@@ -31,6 +32,9 @@ function normalizeNode(input: any): TreeNode {
         talkingPoints,
         questions,
         sentiment: input?.sentiment,
+        type: input?.type,
+        objectionBundle: input?.objectionBundle,
+        objectionQuality: input?.objectionQuality,
         children: childrenRaw.map(normalizeNode),
     };
 }
@@ -57,10 +61,28 @@ const LETTER_SPACE_LETTER = /\p{L}+\s+\p{L}+/u;
 
 type CaptureValidationResult = { ok: true } | { ok: false; reason: 'need_more_context' };
 
+const ObjectionBundleSchema = z.object({
+    primaryLine: z.string().optional(),
+    diagnoseQuestion: z.string().optional(),
+    responses: z.object({
+        soft: z.string().optional(),
+        direct: z.string().optional(),
+        challenger: z.string().optional(),
+    }).optional(),
+    proof: z.string().optional(),
+    riskReset: z.string().optional(),
+    nextStep: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    patternHints: z.record(z.string(), z.string()).optional(),
+    emotionVariants: z.record(z.string(), z.any()).optional(),
+}).passthrough();
+
 const NodeSchema: z.ZodType<any> = z.object({
     id: z.string().optional(),
     title: z.string().optional(),
     sentiment: z.enum(['positive', 'neutral', 'negative']).optional(),
+    type: z.enum(['decision', 'objection', 'info']).optional(),
+    objectionBundle: ObjectionBundleSchema.optional(),
     talkingPoints: z.array(z.string()).optional(),
     questions: z.array(z.string()).optional(),
     sayNow: z.array(z.string()).optional(),
@@ -99,6 +121,17 @@ const ProjectBundleSchema = z.object({
     objections: z.array(z.string().min(1).max(40)).min(4).max(8).optional(),
     objectionHandlers: z.record(z.string(), NodeSchema).optional(),
 }).passthrough();
+
+function createPlaceholderBundle(): ObjectionBundle {
+    return {
+        primaryLine: '',
+        diagnoseQuestion: '',
+        responses: { soft: '', direct: '' },
+        nextStep: '',
+        tags: [],
+        needsFill: true,
+    };
+}
 
 const SCENARIO_TREE_TEMPLATES: Record<ScenarioType, string> = {
     salary_negotiation: `Focus on compensation bands, scope, performance, timing, and trade-offs. Keep language professional, data-backed, and non-confrontational.`,
@@ -588,10 +621,18 @@ function normalizeBundle(
     const normalizedHandlers: Record<string, TreeNode> = {};
     for (const label of labels) {
         if (label === 'Other...') continue;
-        const handler = handlersRaw[label]
-            ? ensureSentimentBranches(addIdsToTree(handlersRaw[label]))
+        const handlerRaw = handlersRaw[label];
+        const normalizedNode = handlerRaw
+            ? ensureSentimentBranches(addIdsToTree(handlerRaw))
             : fallbackSentimentNode('negative');
-        normalizedHandlers[label] = handler;
+        const bundle = handlerRaw?.objectionBundle || normalizedNode.objectionBundle || (normalizedNode.sentiment === 'negative' ? createPlaceholderBundle() : undefined);
+        const quality = validateObjectionBundle(bundle);
+        normalizedHandlers[label] = {
+            ...normalizedNode,
+            type: normalizedNode.type || 'objection',
+            objectionBundle: bundle,
+            objectionQuality: quality,
+        };
     }
 
     return {
@@ -686,21 +727,30 @@ export async function generateObjectionHandlersAction(
 
     const systemPrompt = `Generate objection handlers for the given list. For each objection label, output a node with:
 - title (2-4 words)
-- talkingPoints (1-2 short lines)
-- questions (2 short questions)
 - sentiment: "negative"
-- children: exactly 3 child nodes (positive/neutral/negative)
+- objectionBundle with:
+  - primaryLine (<=2 sentences)
+  - diagnoseQuestion (<=1 sentence)
+  - responses: { soft, direct, challenger? } (<=2 sentences each)
+  - proof? (<=1 sentence)
+  - riskReset? (<=1 sentence)
+  - nextStep (<=1 sentence)
+  - tags (array of short labels)
+- children: exactly 3 child nodes (positive/neutral/negative) with short talkingPoints/questions
 
 Return JSON object:
 { "handlers": { "Label": { ...node }, ... } }`;
 
-    const response = await client.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-            { role: 'system', content: systemPrompt },
-            {
-                role: 'user',
-                content: `Scenario category: ${category}
+    const maxAttempts = 3;
+    let best: { handlers: Record<string, TreeNode>; score: number } | null = null;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const response = await client.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [
+                { role: 'system', content: systemPrompt },
+                {
+                    role: 'user',
+                    content: `Scenario category: ${category}
 Goal: ${buckets.goal}
 Stakeholder: ${buckets.stakeholder}
 Context: ${buckets.context}
@@ -708,22 +758,46 @@ Decision frame: ${buckets.decisionFrame}
 Tone: ${buckets.tone || router.tone}
 
 Objections: ${objections.join(', ')}`
-            }
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.6,
-    });
+                }
+            ],
+            response_format: { type: 'json_object' },
+            temperature: 0.6,
+        });
 
-    const content = response.choices[0]?.message?.content;
-    if (!content) throw new Error('No response from AI');
-    const parsed = JSON.parse(content) as { handlers?: Record<string, TreeNode> };
-    const handlers = parsed.handlers || {};
-    const normalized: Record<string, TreeNode> = {};
-    for (const [label, node] of Object.entries(handlers)) {
-        const normalizedNode = ensureSentimentBranches(addIdsToTree(node));
-        normalized[label] = normalizedNode;
+        const content = response.choices[0]?.message?.content;
+        if (!content) throw new Error('No response from AI');
+        const parsed = JSON.parse(content) as { handlers?: Record<string, TreeNode> };
+        const handlers = parsed.handlers || {};
+        const normalized: Record<string, TreeNode> = {};
+        let totalScore = 0;
+        let errorCount = 0;
+
+        for (const [label, node] of Object.entries(handlers)) {
+            const normalizedNode = ensureSentimentBranches(addIdsToTree(node));
+            const bundle = (node as any)?.objectionBundle || normalizedNode.objectionBundle || createPlaceholderBundle();
+            const quality = validateObjectionBundle(bundle);
+            if (quality.errors.length > 0) errorCount += 1;
+            totalScore += quality.score;
+            normalized[label] = {
+                ...normalizedNode,
+                type: normalizedNode.type || 'objection',
+                objectionBundle: bundle,
+                objectionQuality: quality,
+                talkingPoints: normalizedNode.talkingPoints.length ? normalizedNode.talkingPoints : (bundle.primaryLine ? [bundle.primaryLine] : []),
+                questions: normalizedNode.questions.length ? normalizedNode.questions : (bundle.diagnoseQuestion ? [bundle.diagnoseQuestion] : []),
+            };
+        }
+
+        const avgScore = Object.keys(normalized).length ? totalScore / Object.keys(normalized).length : 0;
+        if (!best || avgScore > best.score) {
+            best = { handlers: normalized, score: avgScore };
+        }
+        if (errorCount === 0 && avgScore >= 70) {
+            return normalized;
+        }
     }
-    return normalized;
+
+    return best?.handlers || {};
 }
 
 export async function generateScenarioObjectionsAction(
@@ -777,7 +851,10 @@ export async function generateProjectBundleAction(
 - Each node includes 1-2 sayNow lines + 2-3 askNext questions
 - Each node must include exactly 3 children with sentiments positive/neutral/negative
 - objections: list of 4-8 scenario-specific labels (<= 40 chars each, no "Other...")
-- objectionHandlers: map label -> node that handles the objection (sentiment "negative") with 3 children
+- objectionHandlers: map label -> node that handles the objection (sentiment "negative") with:
+  - title (2-4 words)
+  - objectionBundle (primaryLine, diagnoseQuestion, responses {soft/direct/challenger?}, proof?, riskReset?, nextStep, tags[])
+  - children (3 nodes: positive/neutral/negative)
 Keep strings short. Limit arrays to max 2-3 items.
 
 Return JSON with keys:
@@ -792,7 +869,7 @@ Return JSON with keys:
   "scenario_category": "...",
   "root": { "title": "...", "sayNow": [], "askNext": [], "sentiment": "neutral", "children": [] },
   "objections": ["..."],
-  "objectionHandlers": { "Label": { "title": "...", "sayNow": [], "askNext": [], "sentiment": "negative", "children": [] } }
+  "objectionHandlers": { "Label": { "title": "...", "objectionBundle": { ... }, "sentiment": "negative", "children": [] } }
 }`;
 
     const userPrompt = `Raw capture: ${capture}`;
@@ -886,6 +963,17 @@ Return JSON with keys:
     }
 
     const normalized = normalizeBundle(parsed, capture, objections, objectionsFallback);
+    const handlerLabels = Object.keys(normalized.objectionHandlers);
+    const handlerScores = handlerLabels.map((label) => normalized.objectionHandlers[label]?.objectionQuality?.score || 0);
+    const handlerErrors = handlerLabels.filter((label) => (normalized.objectionHandlers[label]?.objectionQuality?.errors.length || 0) > 0);
+    if (handlerLabels.length > 0 && (handlerErrors.length > 0 || handlerScores.some((score) => score < 70))) {
+        try {
+            const regenerated = await generateObjectionHandlersAction(normalized.router, normalized.buckets, userApiKey, clientId);
+            normalized.objectionHandlers = regenerated;
+        } catch (e) {
+            console.warn('[objections] handler regeneration failed', e);
+        }
+    }
     console.log('[generateProjectBundleAction] total_ms', Date.now() - start);
     return {
         ok: true,

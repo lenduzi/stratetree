@@ -33,6 +33,12 @@ export interface ObjectionBundleBase {
     needsFill?: boolean;
 }
 
+export interface ObjectionQuality {
+    score: number;
+    errors: string[];
+    warnings: string[];
+}
+
 export interface ObjectionBundle extends ObjectionBundleBase {
     emotionVariants?: {
         neutral?: Partial<ObjectionBundleBase>;
@@ -50,6 +56,7 @@ export interface TreeNode {
     sentiment?: NodeSentiment; // Color coding: positive (green), neutral (yellow), negative (red)
     type?: NodeType;
     objectionBundle?: ObjectionBundle;
+    objectionQuality?: ObjectionQuality;
     children: TreeNode[];      // Child options/branches
 }
 
