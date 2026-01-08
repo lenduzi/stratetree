@@ -17,19 +17,23 @@ export function DemoStructuring() {
 
     useEffect(() => {
         let mounted = true;
-        const run = async () => {
-            resetProgress();
-            startProgress();
-            for (let i = 1; i < STAGES.length; i += 1) {
+        const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+        const runLoop = async () => {
+            while (mounted) {
+                resetProgress();
+                startProgress();
+                for (let i = 1; i < STAGES.length; i += 1) {
+                    if (!mounted) return;
+                    await delay(1200);
+                    await advanceStage();
+                }
                 if (!mounted) return;
-                await new Promise((resolve) => setTimeout(resolve, 1200));
-                await advanceStage();
+                await delay(1200);
+                finishProgress();
+                await delay(800);
             }
-            if (!mounted) return;
-            await new Promise((resolve) => setTimeout(resolve, 1200));
-            finishProgress();
         };
-        run();
+        runLoop();
         return () => {
             mounted = false;
         };

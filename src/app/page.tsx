@@ -88,25 +88,43 @@ export default function LandingPage() {
             </span>
           </h1>
           <p className="landing-subtext">
-            Structure your convo, reach your goal
+            Structure your convo and reach your goal
           </p>
         </div>
 
         <div className="landing-capture">
           <CaptureFlow
-            primaryLabel="Create my YapMap"
-            microcopy="Free to try • No signup • Yappi coaches you live"
+            primaryLabel="Get my game plan"
+            microcopy="Free to try • No signup • Live prompts during the convo"
+            placeholder="What's the situation? Who's involved, and what do you want to achieve?"
+            showCaptureHeader={false}
+            showVoiceHint={false}
+            autoSubmitOnTranscribe={false}
             showCancel={false}
             isGuest
             onComplete={(projectId) => router.push(`/app/project/${projectId}`)}
           />
         </div>
 
-        <div className="landing-empty">
-          <h2>Prepare your first conversation</h2>
-          <p>Use the box above to turn your situation into a live coaching plan.</p>
-        </div>
       </main>
+
+      <section className="landing-pillars">
+        <div className="pillar-card">
+          <div className="pillar-eyebrow">SECURE</div>
+          <div className="pillar-title">Private by default</div>
+          <div className="pillar-body">Your input stays yours — shared with no one.</div>
+        </div>
+        <div className="pillar-card">
+          <div className="pillar-eyebrow">FREE</div>
+          <div className="pillar-title">Try it instantly</div>
+          <div className="pillar-body">No signup required.</div>
+        </div>
+        <div className="pillar-card">
+          <div className="pillar-eyebrow">SMART</div>
+          <div className="pillar-title">Real-time help</div>
+          <div className="pillar-body">Get live prompts when the convo takes a turn.</div>
+        </div>
+      </section>
 
       <DemoSection />
     </div>

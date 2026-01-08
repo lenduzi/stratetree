@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { Project, StructuredBuckets, TreeNode, ScenarioRouterResult } from '@/lib/types';
 import { saveProject } from '@/lib/db';
@@ -25,6 +25,10 @@ type CaptureFlowProps = {
   title?: string;
   primaryLabel?: string;
   microcopy?: string;
+  placeholder?: string;
+  showCaptureHeader?: boolean;
+  showVoiceHint?: boolean;
+  autoSubmitOnTranscribe?: boolean;
   showCancel?: boolean;
   isGuest?: boolean;
   onComplete: (projectId: string) => void;
@@ -37,11 +41,16 @@ export function CaptureFlow({
   title,
   primaryLabel = 'Create my YapMap',
   microcopy,
+  placeholder = "Dump your thoughts. What’s the situation?",
+  showCaptureHeader = true,
+  showVoiceHint = true,
+  autoSubmitOnTranscribe = false,
   showCancel = true,
   isGuest = true,
   onComplete,
   onClose,
 }: CaptureFlowProps) {
+  const textareaId = useId();
   const [captureText, setCaptureText] = useState('');
   const [step, setStep] = useState<Step>('capture');
   const [isListening, setIsListening] = useState(false);
@@ -157,7 +166,11 @@ export function CaptureFlow({
       setLastTranscript(text);
       const nextText = `${captureText}${captureText && !captureText.endsWith(' ') ? ' ' : ''}${text}`;
       setCaptureText(nextText);
-      await startStructuring(nextText);
+      if (autoSubmitOnTranscribe) {
+        await startStructuring(nextText);
+      } else {
+        setIsProcessing(false);
+      }
     } catch (err) {
       console.error('Transcription failed:', err);
       alert('Failed to transcribe audio. Please check your API key.');
@@ -344,6 +357,9 @@ export function CaptureFlow({
       }
       console.log('[capture] db_ms', Date.now() - dbEndStart);
       finishProgress();
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('pwa_nudge_trigger', '1');
+      }
       onComplete(id);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to structure project');
@@ -385,40 +401,58 @@ export function CaptureFlow({
     });
   };
 
+  const showMicPulse = !captureText.trim() && !isListening;
+
   return (
     <>
       {title && <h2 className="modal-title">{title}</h2>}
       {step === 'capture' ? (
         <>
           <div className="capture-body">
-            <button
-              type="button"
-              className={`capture-mic ${isListening ? 'is-listening' : ''}`}
-              onClick={() => toggleListening()}
-              disabled={isProcessing}
-            >
-              {isListening ? '◼' : '🎤'}
-            </button>
-            <div className="capture-label">
-              {isListening ? 'Tap again to stop' : 'Tap to yap'}
-              {isListening && <span className="capture-recording">Recording…</span>}
+            {showCaptureHeader && (
+              <div className="capture-input-header">
+                <div className="capture-input-label">Describe the situation</div>
+                <div className="capture-input-micro">Type or dictate — 20–60 seconds is enough.</div>
+              </div>
+            )}
+            <div className="capture-textarea-wrap">
+              <label htmlFor={textareaId} className="sr-only">
+                Describe the situation
+              </label>
+              <textarea
+                id={textareaId}
+                className="capture-textarea"
+                value={captureText}
+                onChange={(e) => {
+                  setCaptureText(e.target.value);
+                  setGuardrailMessage(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    startStructuring(captureText);
+                  }
+                }}
+                placeholder={placeholder}
+                rows={4}
+              />
+              <button
+                type="button"
+                className={`capture-mic-inline ${isListening ? 'is-listening' : ''}${showMicPulse ? ' demo-mic' : ''}`}
+                onClick={() => toggleListening()}
+                disabled={isProcessing}
+                aria-label={isListening ? 'Tap again to stop' : 'Tap to yap'}
+                title={isListening ? 'Tap again to stop' : 'Tap to yap'}
+              >
+                {isListening ? '◼' : '🎤'}
+              </button>
             </div>
-            <textarea
-              className="capture-textarea"
-              value={captureText}
-              onChange={(e) => {
-                setCaptureText(e.target.value);
-                setGuardrailMessage(null);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  startStructuring(captureText);
-                }
-              }}
-              placeholder="Dump your thoughts. What’s the situation?"
-              rows={4}
-            />
+            {showVoiceHint && (
+              <div className="capture-voice-hint">
+                {isListening ? 'Tap again to stop' : 'Tap to yap'}
+                {isListening && <span className="capture-recording">Recording…</span>}
+              </div>
+            )}
             {guardrailMessage && (
               <div className="card capture-guardrail">
                 <div className="capture-guardrail-title">{guardrailMessage}</div>
