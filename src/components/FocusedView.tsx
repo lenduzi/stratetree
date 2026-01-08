@@ -30,7 +30,6 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
     const [lastSelectedSentiment, setLastSelectedSentiment] = useState<TreeNode['sentiment'] | null>(null);
     const [isAuthed, setIsAuthed] = useState<boolean | null>(null);
     const [isGeneratingNextMoves, setIsGeneratingNextMoves] = useState(false);
-    const [showPanicHelp, setShowPanicHelp] = useState(false);
     const [askNextGenerating, setAskNextGenerating] = useState(false);
     const [askNextError, setAskNextError] = useState<string | null>(null);
     const [idleNudge, setIdleNudge] = useState(false);
@@ -427,13 +426,6 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                             fallbackObjections={objectionsFallback}
                             onSelect={handlePanicSelect}
                         />
-                        <button
-                            className="panic-info-btn"
-                            onClick={() => setShowPanicHelp(true)}
-                            aria-label="Panic help"
-                        >
-                            ?
-                        </button>
                     </div>
                     <button
                         className="btn btn-primary btn-sm call-cta-finish"
@@ -459,12 +451,6 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                                     {showMore ? 'Less' : 'More'}
                                 </button>
                             )}
-                            <button
-                                className="finish-link"
-                                onClick={() => setShowFinishModal(true)}
-                            >
-                                Finish Conversation
-                            </button>
                         </div>
                     </div>
                     <h1 className="current-node-title">
@@ -624,19 +610,6 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                                 router.push('/app');
                             }}>
                                 Continue as guest
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-            {showPanicHelp && (
-                <div className="modal-overlay" onClick={() => setShowPanicHelp(false)}>
-                    <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
-                        <h2 className="modal-title">Using Panic</h2>
-                        <p className="text-muted">Pick why they’re resisting. We’ll generate objection-specific talking points. Then use Positive/Neutral/Negative to continue.</p>
-                        <div className="modal-actions">
-                            <button className="btn btn-secondary" onClick={() => setShowPanicHelp(false)}>
-                                Close
                             </button>
                         </div>
                     </div>

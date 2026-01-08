@@ -1106,24 +1106,26 @@ textarea {
   transition: transform var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast);
 }
 
-.focused-view.call-mode .response-chip:hover:not(:disabled) {
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
-  transform: translateY(-1px);
-}
+@media (hover: hover) and (pointer: fine) {
+  .focused-view.call-mode .response-chip:hover:not(:disabled) {
+    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+    transform: translateY(-1px);
+  }
 
-.focused-view.call-mode .response-chip.response-positive:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--success) 18%, var(--bg-card));
-  border-color: color-mix(in srgb, var(--success) 60%, var(--border-subtle));
-}
+  .focused-view.call-mode .response-chip.response-positive:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--success) 18%, var(--bg-card));
+    border-color: color-mix(in srgb, var(--success) 60%, var(--border-subtle));
+  }
 
-.focused-view.call-mode .response-chip.response-neutral:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--warning) 18%, var(--bg-card));
-  border-color: color-mix(in srgb, var(--warning) 60%, var(--border-subtle));
-}
+  .focused-view.call-mode .response-chip.response-neutral:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--warning) 18%, var(--bg-card));
+    border-color: color-mix(in srgb, var(--warning) 60%, var(--border-subtle));
+  }
 
-.focused-view.call-mode .response-chip.response-negative:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger) 18%, var(--bg-card));
-  border-color: color-mix(in srgb, var(--danger) 60%, var(--border-subtle));
+  .focused-view.call-mode .response-chip.response-negative:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--danger) 18%, var(--bg-card));
+    border-color: color-mix(in srgb, var(--danger) 60%, var(--border-subtle));
+  }
 }
 
 .focused-view.call-mode .response-chip.response-positive {
@@ -2160,11 +2162,11 @@ textarea {
   }
 
   .focused-view.call-mode .call-cta-finish {
-    display: none;
+    display: inline-flex;
   }
 
   .focused-view.call-mode .finish-link {
-    display: inline-flex;
+    display: none;
   }
 
   .focused-view.call-mode .options-fallback-hint {
