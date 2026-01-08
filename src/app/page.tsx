@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { CaptureFlow } from '@/components/CaptureFlow';
 import { ThemeToggle } from '@/components/ThemeProvider';
 import { DemoSection } from '@/components/landing/DemoSection';
+import { supabase } from '@/lib/supabase';
 
 const ROTATING_WORDS = [
   'salary negotiation',
@@ -20,12 +21,32 @@ const ROTATING_WORDS = [
 export default function LandingPage() {
   const router = useRouter();
   const [index, setIndex] = useState(0);
+  const [isAuthed, setIsAuthed] = useState(false);
 
   useEffect(() => {
     const id = setInterval(() => {
       setIndex((prev) => (prev + 1) % ROTATING_WORDS.length);
     }, 2500);
     return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    const checkAuth = async () => {
+      if (!supabase?.auth) return;
+      const { data: { user } } = await supabase.auth.getUser();
+      if (mounted) {
+        setIsAuthed(!!user);
+      }
+    };
+    checkAuth();
+    const { data } = supabase?.auth?.onAuthStateChange(() => {
+      checkAuth();
+    }) || { data: null };
+    return () => {
+      mounted = false;
+      data?.subscription?.unsubscribe();
+    };
   }, []);
 
   const rotatingWord = ROTATING_WORDS[index];
@@ -44,9 +65,15 @@ export default function LandingPage() {
         </div>
         <div className="landing-header-actions">
           <ThemeToggle />
-          <Link href="/login" className="btn btn-secondary btn-sm landing-login">
-            Log in
-          </Link>
+          {isAuthed ? (
+            <Link href="/app" className="btn btn-secondary btn-sm landing-login">
+              Dashboard
+            </Link>
+          ) : (
+            <Link href="/login?redirect=/app" className="btn btn-secondary btn-sm landing-login">
+              Log in
+            </Link>
+          )}
         </div>
       </header>
 
