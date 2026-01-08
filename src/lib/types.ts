@@ -1,6 +1,46 @@
 // Core types for Stratetree
 
 export type NodeSentiment = 'positive' | 'neutral' | 'negative';
+export type NodeType = 'decision' | 'objection' | 'info';
+
+export type ObjectionPattern =
+    | 'clarify'
+    | 'reframe'
+    | 'reduce_risk'
+    | 'proof_mechanism'
+    | 'cost_of_inaction'
+    | 'trade'
+    | 'two_way_close';
+
+export interface ObjectionBundleBase {
+    primaryLine: string;
+    diagnoseQuestion: string;
+    responses: {
+        soft: string;
+        direct: string;
+        challenger?: string;
+    };
+    proof?: string;
+    riskReset?: string;
+    nextStep: string;
+    tags: string[];
+    patternHints?: {
+        primaryLine?: ObjectionPattern;
+        soft?: ObjectionPattern;
+        direct?: ObjectionPattern;
+        challenger?: ObjectionPattern;
+    };
+    needsFill?: boolean;
+}
+
+export interface ObjectionBundle extends ObjectionBundleBase {
+    emotionVariants?: {
+        neutral?: Partial<ObjectionBundleBase>;
+        annoyed?: Partial<ObjectionBundleBase>;
+        skeptical?: Partial<ObjectionBundleBase>;
+        cold?: Partial<ObjectionBundleBase>;
+    };
+}
 
 export interface TreeNode {
     id: string;
@@ -8,6 +48,8 @@ export interface TreeNode {
     talkingPoints: string[];   // What to say at this node
     questions: string[];       // Discovery questions to ask (1-3)
     sentiment?: NodeSentiment; // Color coding: positive (green), neutral (yellow), negative (red)
+    type?: NodeType;
+    objectionBundle?: ObjectionBundle;
     children: TreeNode[];      // Child options/branches
 }
 

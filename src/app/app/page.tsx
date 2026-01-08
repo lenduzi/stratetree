@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Project } from '@/lib/types';
-import { getAllProjects, deleteProject, exportAllData, importData, saveProject, getProject } from '@/lib/db';
+import { getAllProjects, deleteProject, exportAllData, importData, saveProject, getProject, ensureSeedProject } from '@/lib/db';
 import { isServerApiKeyConfigured } from '@/lib/actions';
 import { supabase } from '@/lib/supabase';
 import { getCloudProjects } from '@/lib/project-actions';
@@ -129,7 +129,11 @@ export default function HomePage() {
   const loadProjects = async () => {
     try {
       const data = await getAllProjects();
-      const normalized = await Promise.all(data.map((project) => ensureClientId(project, !!user)));
+      if (data.length === 0) {
+        await ensureSeedProject();
+      }
+      const refreshed = data.length === 0 ? await getAllProjects() : data;
+      const normalized = await Promise.all(refreshed.map((project) => ensureClientId(project, !!user)));
       setProjects(normalized);
     } catch (e) {
       console.error('Failed to load projects:', e);
