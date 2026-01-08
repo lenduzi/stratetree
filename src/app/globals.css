@@ -1326,17 +1326,21 @@ textarea {
   margin: 0;
   white-space: nowrap;
   overflow: visible;
+  display: flex;
+  align-items: baseline;
+  gap: 0.35em;
 }
 
 .headline-static {
-  margin-right: 0.35em;
+  margin-right: 0;
 }
 
 .rotating-slot {
-  display: inline-block;
+  display: inline-flex;
+  align-items: baseline;
   width: 20ch;
   min-height: 1.1em;
-  vertical-align: bottom;
+  vertical-align: baseline;
   overflow: visible;
 }
 
