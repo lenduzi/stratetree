@@ -14,6 +14,31 @@
   --text-secondary: #a0a0b0;
   --text-muted: #606070;
 
+  /* Tailwind theme bridge (HSL) */
+  --background: 224 25% 8%;
+  --foreground: 220 20% 95%;
+  --card: 224 25% 12%;
+  --card-foreground: 220 20% 95%;
+  --popover: 224 25% 12%;
+  --popover-foreground: 220 20% 95%;
+  --primary: 222 100% 74%;
+  --primary-foreground: 224 25% 8%;
+  --secondary: 224 20% 18%;
+  --secondary-foreground: 220 20% 95%;
+  --muted: 224 20% 18%;
+  --muted-foreground: 220 10% 60%;
+  --accent: 222 100% 74%;
+  --accent-foreground: 240 20% 5%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 240 20% 95%;
+  --border: 224 20% 20%;
+  --input: 224 20% 20%;
+  --ring: 222 100% 74%;
+  --radius: 0.75rem;
+  --node-active: 222 100% 74%;
+  --node-visited: 142 70% 45%;
+  --node-pending: 240 8% 41%;
+
   --accent: #7AA2FF;
   --accent-hover: #4F7DFF;
   --accent-pressed: #3B63F3;
@@ -65,6 +90,31 @@
   --text-primary: #0f172a;
   --text-secondary: #334155;
   --text-muted: #64748b;
+
+  /* Tailwind theme bridge (HSL) */
+  --background: 44 87% 94%;
+  --foreground: 222 47% 11%;
+  --card: 43 54% 95%;
+  --card-foreground: 222 47% 11%;
+  --popover: 43 54% 95%;
+  --popover-foreground: 222 47% 11%;
+  --primary: 226 85% 56%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 42 48% 92%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 42 48% 92%;
+  --muted-foreground: 215 16% 47%;
+  --accent: 226 85% 56%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 42 30% 85%;
+  --input: 42 30% 85%;
+  --ring: 226 85% 56%;
+  --radius: 0.75rem;
+  --node-active: 226 85% 56%;
+  --node-visited: 142 70% 45%;
+  --node-pending: 215 16% 47%;
 
   /* Cornflower blue accents */
   --accent: #2F5BEE;
@@ -2692,4 +2742,17 @@ textarea {
   .focused-view.call-mode .options-list .node-card {
     min-height: 72px;
   }
+}
+
+/* Tailwind utility bridges for Lovable UI */
+.gradient-primary {
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)));
+}
+
+.shadow-card {
+  box-shadow: var(--shadow-md);
+}
+
+.shadow-soft {
+  box-shadow: var(--shadow-sm);
 }

@@ -984,6 +984,82 @@ Return JSON with keys:
     };
 }
 
+export async function expandNodeAction(
+    description: string,
+    node: TreeNode,
+    userApiKey?: string,
+    clientId?: string
+): Promise<TreeNode[]> {
+    await enforceRateLimit(clientId);
+    const client = getOpenAIClient(userApiKey);
+    const systemPrompt = `Return JSON ONLY in this shape:
+{
+  "branches": [
+    { "title": "...", "talkingPoints": ["..."], "questions": ["..."] }
+  ]
+}
+Rules:
+- 2 to 4 branches
+- Titles <= 6 words
+- talkingPoints: 2-4 short lines
+- questions: 0-2 short questions`;
+
+    const userPrompt = `Conversation context: ${description}
+Current node: ${node.title}
+Talking points: ${(node.talkingPoints || []).join(' | ')}
+Questions: ${(node.questions || []).join(' | ')}`;
+
+    const response = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.6,
+    });
+
+    const content = response.choices[0]?.message?.content || '{}';
+    let parsed: any = null;
+    try {
+        parsed = JSON.parse(content);
+    } catch {
+        parsed = null;
+    }
+    const branchesRaw: any[] = Array.isArray(parsed?.branches) ? parsed.branches : [];
+    const normalized = branchesRaw.map((branch: any) => ({
+        ...normalizeNode(branch),
+        children: [],
+    }));
+    return normalized.slice(0, 4);
+}
+
+export async function quickChatAction(
+    description: string,
+    node: TreeNode,
+    userQuestion: string,
+    userApiKey?: string,
+    clientId?: string
+): Promise<string> {
+    await enforceRateLimit(clientId);
+    const client = getOpenAIClient(userApiKey);
+    const systemPrompt = `You are YapMap. Provide a concise, actionable response (1-3 sentences max) to help in a live conversation.`;
+    const userPrompt = `Context: ${description}
+Current node: ${node.title}
+Talking points: ${(node.talkingPoints || []).join(' | ')}
+User question: ${userQuestion}`;
+
+    const response = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.7,
+    });
+    return response.choices[0]?.message?.content?.trim() || 'No response.';
+}
+
 // Generate a decision tree from a scenario description
 export async function generateTreeAction(
     scenario: string,

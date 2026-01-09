@@ -1,19 +1,31 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { Plus, Settings, Clock, Trash2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { Project } from '@/lib/types';
-import { getAllProjects, deleteProject, exportAllData, importData, saveProject, getProject, ensureSeedProject } from '@/lib/db';
+import { getAllProjects, deleteProject, saveProject, getProject, ensureSeedProject } from '@/lib/db';
 import { isServerApiKeyConfigured } from '@/lib/actions';
 import { supabase } from '@/lib/supabase';
 import { getCloudProjects } from '@/lib/project-actions';
-import { ThemeToggle } from '@/components/ThemeProvider';
-import { User } from '@supabase/supabase-js';
 import { getBrowserApiKey } from '@/lib/settings';
 import { CaptureFlow } from '@/components/CaptureFlow';
 import { getGuestProjects, migrateGuestProjectsToAccount, setGuestProjects } from '@/lib/guest';
 import { v4 as uuidv4 } from 'uuid';
+import { User } from '@supabase/supabase-js';
 
 export default function HomePage() {
   const router = useRouter();
@@ -23,8 +35,6 @@ export default function HomePage() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(false);
   const [user, setUser] = useState<User | null>(null);
-  const [signOutMessage, setSignOutMessage] = useState(false);
-  const [migrationToast, setMigrationToast] = useState(false);
 
   useEffect(() => {
     checkUser();
@@ -34,14 +44,11 @@ export default function HomePage() {
   }, []);
 
   const checkApiKey = async () => {
-    // Check local storage immediately for faster UI update
     const localKey = getBrowserApiKey();
     if (localKey) {
       setHasApiKey(true);
       return;
     }
-
-    // Otherwise check the server
     try {
       const configured = await isServerApiKeyConfigured();
       setHasApiKey(configured);
@@ -77,7 +84,6 @@ export default function HomePage() {
   const migrateGuests = async (userId: string) => {
     if (!supabase?.auth) return;
     try {
-      console.log('[guest] attempting migration');
       const migratedCount = await migrateGuestProjectsToAccount(userId, async (rows) => {
         const { error } = await supabase
           .from('projects')
@@ -85,12 +91,9 @@ export default function HomePage() {
         if (error) throw error;
       });
       if (migratedCount > 0) {
-        console.log('[guest] migrated', migratedCount);
-        setMigrationToast(true);
         loadProjects();
         setGuestProjects([]);
         setGuestProjectsState([]);
-        window.setTimeout(() => setMigrationToast(false), 1200);
       }
     } catch (e) {
       console.warn('Guest migration failed', e);
@@ -118,7 +121,7 @@ export default function HomePage() {
     try {
       const cloudProjects = await getCloudProjects();
       for (const p of cloudProjects) {
-        await saveProject(p, false); // Save locally without pushing back
+        await saveProject(p, false);
       }
       loadProjects();
     } catch (e) {
@@ -142,277 +145,144 @@ export default function HomePage() {
     }
   };
 
-  const handleExport = async () => {
-    const data = await exportAllData();
-    const blob = new Blob([data], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `yapmap-export-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const handleDeleteProject = async (id: string) => {
+    await deleteProject(id);
+    loadProjects();
   };
 
-  const handleImport = async () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = async (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (file) {
-        const text = await file.text();
-        const count = await importData(text);
-        alert(`Imported ${count} project(s)`);
-        loadProjects();
-      }
-    };
-    input.click();
-  };
-
-  const handleDeleteProject = async (id: string, name: string) => {
-    if (confirm(`Delete "${name}"? This cannot be undone.`)) {
-      await deleteProject(id);
-      loadProjects();
-    }
-  };
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    setSignOutMessage(true);
-    window.setTimeout(() => {
-      router.replace('/');
-      router.refresh();
-    }, 600);
-  };
-
-  const handleGuestGoogle = async () => {
-    if (!supabase?.auth) return;
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('yapmap-auth-redirect', '/app');
-    }
-    const origin = window.location.origin;
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${origin}/auth/callback`,
-      },
+  const formatDate = (timestamp: number) => {
+    return new Date(timestamp).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
     });
   };
 
-  const logoutLabel = (() => {
-    const fullName = user?.user_metadata?.full_name || user?.user_metadata?.name;
-    if (typeof fullName === 'string' && fullName.trim()) {
-      const first = fullName.trim().split(/\s+/)[0];
-      return `Log out (${first})`;
-    }
-    return 'Log out';
-  })();
-
   return (
-    <div className="focused-view">
-      <header className="header">
-        <Link href="/app" className="logo">
-          <span className="logo-icon">🌳</span>
-          <span>YapMap</span>
-        </Link>
-        <div className="flex items-center gap-sm header-actions">
-          <button className="btn btn-secondary btn-sm header-action header-import" onClick={handleImport}>
-            Import
-          </button>
-          <button className="btn btn-secondary btn-sm header-action header-export" onClick={handleExport}>
-            Export
-          </button>
-          <Link href="/app/settings" className="btn btn-secondary btn-sm header-action">
-            ⚙️ Settings
-          </Link>
-          {user ? (
-            <button className="btn btn-secondary btn-sm header-action" onClick={handleLogout}>
-              {logoutLabel}
-            </button>
-          ) : (
-            <Link href="/login?redirect=/app" className="btn btn-primary btn-sm header-action">
-              Sign In
-            </Link>
-          )}
-          <ThemeToggle />
+    <div className="min-h-screen bg-background">
+      <header className="border-b border-border bg-card">
+        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg gradient-primary flex items-center justify-center">
+              <span className="text-primary-foreground text-lg">🧠</span>
+            </div>
+            <h1 className="text-xl font-display font-bold">YapMap</h1>
+          </div>
+          <Button variant="ghost" size="icon" onClick={() => router.push('/settings')}>
+            <Settings className="w-5 h-5" />
+          </Button>
         </div>
       </header>
 
-      <main className="container">
-        {signOutMessage && (
-          <div className="card mb-lg" style={{ padding: 'var(--space-sm)', textAlign: 'center' }}>
-            <span className="text-muted">Signed out</span>
-          </div>
+      <main className="container mx-auto px-4 py-8">
+        {!hasApiKey && (
+          <Card className="mb-6 border-destructive/50 bg-destructive/5">
+            <CardContent className="py-4">
+              <p className="text-sm text-destructive">
+                No API key configured.{' '}
+                <button
+                  onClick={() => router.push('/settings')}
+                  className="underline font-medium hover:no-underline"
+                >
+                  Add your OpenAI API key
+                </button>{' '}
+                to enable AI features.
+              </p>
+            </CardContent>
+          </Card>
         )}
-        {migrationToast && (
-          <div className="card mb-lg" style={{ padding: 'var(--space-sm)', textAlign: 'center' }}>
-            <span className="text-muted">✅ Imported your guest YapMap to your free account.</span>
-          </div>
-        )}
-        {!user && guestProjects.length > 0 && (
-          <div className="card mb-lg">
-            <strong>Guest mode</strong>
-            <p className="text-muted" style={{ marginBottom: 'var(--space-sm)' }}>
-              This YapMap is saved locally on this device only. Create a free account to sync and save more.
-            </p>
-            <div className="flex flex-col gap-sm">
-              <button className="btn btn-google w-full" onClick={handleGuestGoogle}>
-                <span className="google-icon" aria-hidden="true">
-                  <svg width="20" height="20" viewBox="0 0 48 48" role="img" focusable="false">
-                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.9-6.9C35.86 2.7 30.28 0 24 0 14.62 0 6.51 5.38 2.56 13.22l8.12 6.3C12.6 13.09 17.86 9.5 24 9.5z"/>
-                    <path fill="#4285F4" d="M46.5 24.5c0-1.57-.15-3.08-.41-4.5H24v9h12.66c-.55 2.96-2.2 5.46-4.66 7.14l7.44 5.77c4.35-4.01 6.86-9.92 6.86-17.41z"/>
-                    <path fill="#FBBC05" d="M10.68 28.52c-.48-1.45-.76-3-.76-4.52s.28-3.07.76-4.52l-8.12-6.3C.92 16.47 0 20.13 0 24s.92 7.53 2.56 10.82l8.12-6.3z"/>
-                    <path fill="#34A853" d="M24 48c6.28 0 11.56-2.07 15.41-5.59l-7.44-5.77c-2.07 1.39-4.72 2.21-7.97 2.21-6.14 0-11.4-3.59-13.32-8.52l-8.12 6.3C6.51 42.62 14.62 48 24 48z"/>
-                    <path fill="none" d="M0 0h48v48H0z"/>
-                  </svg>
-                </span>
-                <span>Continue with Google</span>
-              </button>
-              <Link href="/login?redirect=/app" className="btn btn-secondary w-full">
-                Continue with email
-              </Link>
-            </div>
-          </div>
-        )}
-        <div className="flex items-center justify-between mb-lg project-hero">
-          <div>
-            <h1>Your Strategy Trees</h1>
-            <p className="text-muted">Prepare for conversations with decision trees</p>
-          </div>
-          <button
-            className="btn btn-primary btn-lg project-cta project-cta-desktop"
+
+        <div className="mb-8">
+          <Button
             onClick={() => setShowNewModal(true)}
+            className="gradient-primary text-primary-foreground hover:opacity-90 transition-opacity"
+            size="lg"
           >
-            + New Project
-          </button>
+            <Plus className="w-5 h-5 mr-2" />
+            New Project
+          </Button>
         </div>
 
-        {!hasApiKey && (
-          <div
-            className="card mb-lg"
-            style={{
-              borderColor: 'var(--warning)',
-              background: 'var(--warning-bg)'
-            }}
-          >
-            <div className="flex items-center gap-md">
-              <span style={{ fontSize: '1.5rem' }}>⚠️</span>
-              <div>
-                <strong>OpenAI API key not configured</strong>
-                <p className="text-muted" style={{ margin: 0 }}>
-                  Add your API key in{' '}
-                  <Link href="/app/settings" style={{ color: 'var(--accent-secondary)' }}>
-                    Settings
-                  </Link>
-                  {' '}to enable AI tree generation.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
         {loading ? (
-          <div className="loading">
-            <div className="spinner" />
-          </div>
-        ) : (user ? projects : guestProjects).length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-state-icon">🌱</div>
-            <div className="empty-state-title">Prepare your first conversation</div>
-            <p>Tap “New Project” to dictate a scenario and generate your tree.</p>
-            <button
-              className="btn btn-primary mt-lg project-cta"
-              onClick={() => setShowNewModal(true)}
-            >
-              New Project
-            </button>
+          <div className="text-muted-foreground">Loading projects...</div>
+        ) : projects.length === 0 ? (
+          <div className="text-center py-16">
+            <div className="w-16 h-16 rounded-full bg-muted mx-auto mb-4 flex items-center justify-center">
+              <span className="text-muted-foreground text-2xl">🧭</span>
+            </div>
+            <h2 className="text-lg font-medium mb-2">No projects yet</h2>
+            <p className="text-muted-foreground mb-6">
+              Create your first conversation map to prepare for your next call
+            </p>
           </div>
         ) : (
-          <div className="project-grid">
-            {(user ? projects : guestProjects).slice(0, 1).map((project) => (
-              <div key={project.id} className="project-card">
-                <Link
-                  href={`/app/project/${project.id}`}
-                  style={{ textDecoration: 'none', color: 'inherit' }}
-                >
-                  <div className="project-name">{project.name}</div>
-                  <div className="project-description">{project.description}</div>
-                </Link>
-                <div className="project-meta">
-                  <span>
-                    Updated {new Date(project.updatedAt).toLocaleDateString()}
-                  </span>
-                  {project.callHistory && project.callHistory.length > 0 && (
-                    <span style={{ color: 'var(--accent-secondary)' }}>
-                      💬 {project.callHistory.length} conversation{project.callHistory.length !== 1 ? 's' : ''}
-                    </span>
-                  )}
-                  <button
-                    onClick={(e) => {
-                      e.preventDefault();
-                      handleDeleteProject(project.id, project.name);
-                    }}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: 'var(--text-muted)',
-                      cursor: 'pointer',
-                      padding: 0,
-                      marginLeft: 'auto',
-                    }}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {projects.map((project) => (
+              <Card
+                key={project.id}
+                className="group hover:shadow-card transition-shadow cursor-pointer"
+                onClick={() => router.push(`/project/${project.id}`)}
+              >
+                <CardHeader className="pb-2">
+                  <div className="flex items-start justify-between">
+                    <CardTitle className="text-lg font-display line-clamp-1">
+                      {project.name}
+                    </CardTitle>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="opacity-0 group-hover:opacity-100 transition-opacity -mr-2 -mt-1"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Trash2 className="w-4 h-4 text-muted-foreground hover:text-destructive" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Delete project?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will permanently delete "{project.name}". This action cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => handleDeleteProject(project.id)}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          >
+                            Delete
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                  <CardDescription className="line-clamp-2">
+                    {project.description || 'No description'}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Clock className="w-3 h-3" />
+                    <span>Updated {formatDate(project.updatedAt)}</span>
+                  </div>
+                </CardContent>
+              </Card>
             ))}
           </div>
         )}
       </main>
 
-      <div className="project-cta-sticky">
-        <button
-          className="btn btn-primary btn-lg project-cta"
-          onClick={() => setShowNewModal(true)}
-        >
-          + New Project
-        </button>
-      </div>
-
       {showNewModal && (
-        <NewProjectModal
-          onClose={() => setShowNewModal(false)}
-          isGuest={!user}
-        />
-      )}
-    </div>
-  );
-}
-
-function NewProjectModal({
-  onClose,
-  isGuest
-}: {
-  onClose: () => void;
-  isGuest: boolean;
-}) {
-  const router = useRouter();
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal capture-modal" onClick={(e) => e.stopPropagation()}>
         <CaptureFlow
-          title="New Project"
-          primaryLabel="Create my YapMap"
-          showCancel
-          isGuest={isGuest}
-          onClose={onClose}
-          onComplete={(projectId) => {
-            onClose();
-            router.push(`/app/project/${projectId}`);
+          onClose={() => setShowNewModal(false)}
+          onComplete={() => {
+            setShowNewModal(false);
+            loadProjects();
           }}
         />
-      </div>
+      )}
     </div>
   );
 }
