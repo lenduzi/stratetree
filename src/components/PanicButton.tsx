@@ -77,9 +77,9 @@ export function PanicButton({ nudgeActive, objections, fallbackObjections, onSel
             <button
                 className={`btn btn-panic btn-lg${nudgeActive ? ' panic-pulse' : ''}`}
                 onClick={() => setIsOpen(!isOpen)}
-                title="Panic Button (P)"
+                title="Objections"
             >
-                🆘 Panic
+                🛡️ Objections
             </button>
         </div>
     );

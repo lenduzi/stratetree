@@ -401,6 +401,9 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                             ← Back
                         </button>
                     )}
+                    <button className="btn btn-secondary btn-sm" onClick={() => setShowSearch((prev) => !prev)}>
+                        {showSearch ? 'Hide' : 'Find'}
+                    </button>
                     <div className="call-cta-panic">
                         <PanicButton
                             nudgeActive={nudgeActive}
@@ -428,11 +431,6 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                     touchStartX.current = null;
                 }}
             >
-                <div className="call-search-row">
-                    <button className="btn btn-secondary btn-sm" onClick={() => setShowSearch((prev) => !prev)}>
-                        {showSearch ? 'Hide search' : 'Find objection'}
-                    </button>
-                </div>
                 {showSearch && (
                     <div className="call-search-panel">
                         <input
@@ -527,22 +525,24 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                         {secondaryReveal === 'challenger' && challengerLine && (
                             <div className="objection-panel secondary">{challengerLine}</div>
                         )}
-                        <div className="emotion-toggle">
-                            {([
-                                { key: 'neutral', label: '😐' },
-                                { key: 'annoyed', label: '😠' },
-                                { key: 'skeptical', label: '🤨' },
-                                { key: 'cold', label: '🧊' },
-                            ] as const).map((item) => (
-                                <button
-                                    key={item.key}
-                                    className={`emotion-chip ${emotion === item.key ? 'active' : ''}`}
-                                    onClick={() => setEmotion(item.key)}
-                                >
-                                    {item.label}
-                                </button>
-                            ))}
-                        </div>
+                        {baseBundle?.emotionVariants && (
+                            <div className="emotion-toggle">
+                                {([
+                                    { key: 'neutral', label: '😐' },
+                                    { key: 'annoyed', label: '😠' },
+                                    { key: 'skeptical', label: '🤨' },
+                                    { key: 'cold', label: '🧊' },
+                                ] as const).map((item) => (
+                                    <button
+                                        key={item.key}
+                                        className={`emotion-chip ${emotion === item.key ? 'active' : ''}`}
+                                        onClick={() => setEmotion(item.key)}
+                                    >
+                                        {item.label}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 ) : (
                     <div className={`current-node say-now-card ${getSentimentClass(currentNode.sentiment)}`}>
@@ -601,22 +601,20 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
                         Finish conversation
                     </button>
                 </div>
-                {!isObjectionNode && (
-                    <>
-                        <div className="options-dock-title">THEIR RESPONSE</div>
-                        <div className="response-chips">
-                            {(['positive', 'neutral', 'negative'] as NodeSentiment[]).map((sentiment) => (
-                                <button
-                                    key={sentiment}
-                                    className={`response-chip response-${sentiment}${negativePulse && sentiment === 'negative' ? ' pulse' : ''}`}
-                                    onClick={() => handleSelectResponse(sentiment)}
-                                >
-                                    {sentiment === 'positive' ? 'Positive' : sentiment === 'neutral' ? 'Neutral' : 'Negative'}
-                                </button>
-                            ))}
-                        </div>
-                    </>
-                )}
+                <>
+                    <div className="options-dock-title">THEIR RESPONSE</div>
+                    <div className="response-chips">
+                        {(['positive', 'neutral', 'negative'] as NodeSentiment[]).map((sentiment) => (
+                            <button
+                                key={sentiment}
+                                className={`response-chip response-${sentiment}${negativePulse && sentiment === 'negative' ? ' pulse' : ''}`}
+                                onClick={() => handleSelectResponse(sentiment)}
+                            >
+                                {sentiment === 'positive' ? 'Positive' : sentiment === 'neutral' ? 'Neutral' : 'Negative'}
+                            </button>
+                        ))}
+                    </div>
+                </>
             </section>
 
             {/* Full tree modal */}
