@@ -307,7 +307,16 @@ export function FocusedView({ project, onProjectUpdate }: FocusedViewProps) {
         if (!selectedLabel) return;
         const handler = project.structured?.objectionHandlers?.[selectedLabel];
         const handlerNode: TreeNode = handler
-            ? { ...handler, type: handler.type || 'objection' }
+            ? {
+                ...handler,
+                type: handler.type || 'objection',
+                talkingPoints: handler.objectionBundle?.primaryLine
+                    ? [handler.objectionBundle.primaryLine]
+                    : handler.talkingPoints,
+                questions: handler.objectionBundle?.diagnoseQuestion
+                    ? [handler.objectionBundle.diagnoseQuestion]
+                    : handler.questions,
+            }
             : {
                 id: uuidv4(),
                 title: `Handle: ${selectedLabel}`,

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Project, StructuredBuckets, TreeNode } from '@/lib/types';
 import { getProject, saveProject } from '@/lib/db';
-import { generateTreeAction, isServerApiKeyConfigured, regenerateBucketAction } from '@/lib/actions';
+import { generateTreeAction, isServerApiKeyConfigured, regenerateBucketAction, generateObjectionHandlersAction } from '@/lib/actions';
 import { TreeEditor } from '@/components/TreeEditor';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ThemeToggle } from '@/components/ThemeProvider';
@@ -256,6 +256,32 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
         await saveProject(updated);
     };
 
+    const repairObjections = async () => {
+        if (!project || !project.structured) return;
+        setGenerating(true);
+        try {
+            const repairedHandlers = await generateObjectionHandlersAction(
+                project.structured.router!,
+                project.structured,
+                getBrowserApiKey() || undefined,
+                getClientId()
+            );
+            const updated = {
+                ...project,
+                structured: {
+                    ...project.structured,
+                    objectionHandlers: repairedHandlers,
+                },
+            };
+            setProject(updated);
+            await saveProject(updated);
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Failed to repair objections');
+        } finally {
+            setGenerating(false);
+        }
+    };
+
     return (
         <div className="focused-view prep-mode">
             <header className="header call-topbar">
@@ -441,6 +467,9 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                                 </button>
                                 <button className="btn btn-secondary btn-sm" onClick={applyHardModeToTree}>
                                     Make it hard
+                                </button>
+                                <button className="btn btn-secondary btn-sm" onClick={repairObjections} disabled={generating}>
+                                    Repair objection bundles
                                 </button>
                             </div>
                         </div>
