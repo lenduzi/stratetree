@@ -33,6 +33,8 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     const [showRawCapture, setShowRawCapture] = useState(false);
     const [selectedArchetypes, setSelectedArchetypes] = useState<string[]>([]);
     const [showArchetypes, setShowArchetypes] = useState(false);
+    const [showQualityPanel, setShowQualityPanel] = useState(false);
+    const [showIntake, setShowIntake] = useState(false);
 
     useEffect(() => {
         loadProject();
@@ -211,6 +213,7 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
     const callModeReady = objectionSummary.total > 0 && objectionSummary.blocking === 0;
     const cachedLocal = true;
     const offlineReady = callModeReady;
+    const hasQualityIssues = objectionSummary.blocking > 0;
     const intake = structured?.intake || {};
     const suggestedArchetypes = suggestTopArchetypes({ capture: structured?.rawCapture || project.description, intake });
     const activeArchetypes = showArchetypes ? OBJECTION_ARCHETYPES : suggestedArchetypes;
@@ -338,106 +341,139 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                     </div>
                 )}
 
-                <div
-                    className="card mb-lg"
-                    style={{
-                        borderColor: callModeReady ? 'var(--success)' : 'var(--warning)',
-                        background: callModeReady ? 'var(--success-bg)' : 'var(--warning-bg)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 'var(--space-md)'
-                    }}
-                >
-                    <span style={{ fontSize: '1.2rem' }}>{callModeReady ? '✅' : '⚠️'}</span>
-                    <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600, marginBottom: 4 }}>Call Mode Ready</div>
-                        <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-                            Objection nodes: {objectionSummary.total || 0} • Blocking issues: {objectionSummary.blocking} • Warnings: {objectionSummary.warnings} • Avg score: {objectionSummary.averageScore || 0}
-                            <div style={{ marginTop: 6 }}>
-                                Cached locally: {cachedLocal ? 'Yes' : 'No'} • Offline-ready: {offlineReady ? 'Yes' : 'No'}
+                {hasQualityIssues && (
+                    <div
+                        className="card mb-lg"
+                        style={{
+                            borderColor: 'var(--warning)',
+                            background: 'var(--warning-bg)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 'var(--space-md)'
+                        }}
+                    >
+                        <span style={{ fontSize: '1.2rem' }}>⚠️</span>
+                        <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 600, marginBottom: 4 }}>Quality issues detected</div>
+                            <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                                {objectionSummary.blocking} blocking issue{objectionSummary.blocking !== 1 ? 's' : ''} found. Repair to unlock Call Mode quality.
+                            </div>
+                        </div>
+                        <button className="btn btn-secondary btn-sm" onClick={() => setShowQualityPanel((prev) => !prev)}>
+                            {showQualityPanel ? 'Hide details' : 'View details'}
+                        </button>
+                    </div>
+                )}
+
+                {showQualityPanel && (
+                    <div
+                        className="card mb-lg"
+                        style={{
+                            borderColor: callModeReady ? 'var(--success)' : 'var(--warning)',
+                            background: callModeReady ? 'var(--success-bg)' : 'var(--warning-bg)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 'var(--space-md)'
+                        }}
+                    >
+                        <span style={{ fontSize: '1.2rem' }}>{callModeReady ? '✅' : '⚠️'}</span>
+                        <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 600, marginBottom: 4 }}>Call Mode Ready</div>
+                            <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                                Objection nodes: {objectionSummary.total || 0} • Blocking issues: {objectionSummary.blocking} • Warnings: {objectionSummary.warnings} • Avg score: {objectionSummary.averageScore || 0}
+                                <div style={{ marginTop: 6 }}>
+                                    Cached locally: {cachedLocal ? 'Yes' : 'No'} • Offline-ready: {offlineReady ? 'Yes' : 'No'}
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
+                )}
 
                 {isStructured ? (
                     <div className="overview">
                         <div className="card mb-lg" style={{ padding: 'var(--space-lg)' }}>
-                            <div style={{ fontWeight: 600, marginBottom: 8 }}>Interview intake</div>
-                            <div className="grid" style={{ gap: 'var(--space-sm)' }}>
-                                <div>
-                                    <div className="text-muted" style={{ fontSize: '0.8rem', marginBottom: 6 }}>Conversation type</div>
-                                    <div className="flex gap-sm" style={{ flexWrap: 'wrap' }}>
-                                        {['deal', 'feedback', 'price', 'conflict', 'performance'].map((value) => (
-                                            <button
-                                                key={value}
-                                                className="btn btn-secondary btn-sm"
-                                                style={{ background: intake.conversationType === value ? 'var(--accent-soft)' : undefined }}
-                                                onClick={() => updateStructured({
-                                                    ...structured!,
-                                                    intake: { ...intake, conversationType: value },
-                                                })}
-                                            >
-                                                {value}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                                <div>
-                                    <div className="text-muted" style={{ fontSize: '0.8rem', marginBottom: 6 }}>Counterpart</div>
-                                    <div className="flex gap-sm" style={{ flexWrap: 'wrap' }}>
-                                        {['boss', 'client', 'partner', 'friend', 'employee'].map((value) => (
-                                            <button
-                                                key={value}
-                                                className="btn btn-secondary btn-sm"
-                                                style={{ background: intake.counterpart === value ? 'var(--accent-soft)' : undefined }}
-                                                onClick={() => updateStructured({
-                                                    ...structured!,
-                                                    intake: { ...intake, counterpart: value },
-                                                })}
-                                            >
-                                                {value}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                                <div>
-                                    <div className="text-muted" style={{ fontSize: '0.8rem', marginBottom: 6 }}>Goal</div>
-                                    <div className="flex gap-sm" style={{ flexWrap: 'wrap' }}>
-                                        {['get yes', 'clarify scope', 'clean no', 'repair relationship'].map((value) => (
-                                            <button
-                                                key={value}
-                                                className="btn btn-secondary btn-sm"
-                                                style={{ background: intake.goalType === value ? 'var(--accent-soft)' : undefined }}
-                                                onClick={() => updateStructured({
-                                                    ...structured!,
-                                                    intake: { ...intake, goalType: value },
-                                                })}
-                                            >
-                                                {value}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                                <div>
-                                    <div className="text-muted" style={{ fontSize: '0.8rem', marginBottom: 6 }}>Sensitive area</div>
-                                    <div className="flex gap-sm" style={{ flexWrap: 'wrap' }}>
-                                        {['budget', 'time', 'risk', 'trust', 'brand', 'control', 'politics'].map((value) => (
-                                            <button
-                                                key={value}
-                                                className="btn btn-secondary btn-sm"
-                                                style={{ background: intake.sensitiveArea === value ? 'var(--accent-soft)' : undefined }}
-                                                onClick={() => updateStructured({
-                                                    ...structured!,
-                                                    intake: { ...intake, sensitiveArea: value },
-                                                })}
-                                            >
-                                                {value}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                <div style={{ fontWeight: 600 }}>Refine scenario</div>
+                                <button className="btn btn-secondary btn-sm" onClick={() => setShowIntake((prev) => !prev)}>
+                                    {showIntake ? 'Hide' : 'Edit'}
+                                </button>
                             </div>
+                            {showIntake && (
+                                <div className="grid" style={{ gap: 'var(--space-sm)' }}>
+                                    <div>
+                                        <div className="text-muted" style={{ fontSize: '0.8rem', marginBottom: 6 }}>Conversation type</div>
+                                        <div className="flex gap-sm" style={{ flexWrap: 'wrap' }}>
+                                            {['deal', 'feedback', 'price', 'conflict', 'performance'].map((value) => (
+                                                <button
+                                                    key={value}
+                                                    className="btn btn-secondary btn-sm"
+                                                    style={{ background: intake.conversationType === value ? 'var(--accent-soft)' : undefined }}
+                                                    onClick={() => updateStructured({
+                                                        ...structured!,
+                                                        intake: { ...intake, conversationType: value },
+                                                    })}
+                                                >
+                                                    {value}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="text-muted" style={{ fontSize: '0.8rem', marginBottom: 6 }}>Counterpart</div>
+                                        <div className="flex gap-sm" style={{ flexWrap: 'wrap' }}>
+                                            {['boss', 'client', 'partner', 'friend', 'employee'].map((value) => (
+                                                <button
+                                                    key={value}
+                                                    className="btn btn-secondary btn-sm"
+                                                    style={{ background: intake.counterpart === value ? 'var(--accent-soft)' : undefined }}
+                                                    onClick={() => updateStructured({
+                                                        ...structured!,
+                                                        intake: { ...intake, counterpart: value },
+                                                    })}
+                                                >
+                                                    {value}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="text-muted" style={{ fontSize: '0.8rem', marginBottom: 6 }}>Goal</div>
+                                        <div className="flex gap-sm" style={{ flexWrap: 'wrap' }}>
+                                            {['get yes', 'clarify scope', 'clean no', 'repair relationship'].map((value) => (
+                                                <button
+                                                    key={value}
+                                                    className="btn btn-secondary btn-sm"
+                                                    style={{ background: intake.goalType === value ? 'var(--accent-soft)' : undefined }}
+                                                    onClick={() => updateStructured({
+                                                        ...structured!,
+                                                        intake: { ...intake, goalType: value },
+                                                    })}
+                                                >
+                                                    {value}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="text-muted" style={{ fontSize: '0.8rem', marginBottom: 6 }}>Sensitive area</div>
+                                        <div className="flex gap-sm" style={{ flexWrap: 'wrap' }}>
+                                            {['budget', 'time', 'risk', 'trust', 'brand', 'control', 'politics'].map((value) => (
+                                                <button
+                                                    key={value}
+                                                    className="btn btn-secondary btn-sm"
+                                                    style={{ background: intake.sensitiveArea === value ? 'var(--accent-soft)' : undefined }}
+                                                    onClick={() => updateStructured({
+                                                        ...structured!,
+                                                        intake: { ...intake, sensitiveArea: value },
+                                                    })}
+                                                >
+                                                    {value}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         <div className="card mb-lg" style={{ padding: 'var(--space-lg)' }}>
@@ -462,16 +498,29 @@ export default function ProjectPage({ params }: { params: Promise<{ id: string }
                                 ))}
                             </div>
                             <div className="flex gap-sm" style={{ marginTop: 'var(--space-md)' }}>
-                                <button className="btn btn-primary btn-sm" onClick={applyArchetypes}>
+                                <button
+                                    className="btn btn-primary btn-sm"
+                                    onClick={applyArchetypes}
+                                    disabled={selectedArchetypes.length === 0}
+                                >
                                     Generate objection nodes
                                 </button>
                                 <button className="btn btn-secondary btn-sm" onClick={applyHardModeToTree}>
                                     Make it hard
                                 </button>
-                                <button className="btn btn-secondary btn-sm" onClick={repairObjections} disabled={generating}>
+                                <button
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={repairObjections}
+                                    disabled={generating || !project.structured?.router}
+                                >
                                     Repair objection bundles
                                 </button>
                             </div>
+                            {!project.structured?.router && (
+                                <div className="text-muted" style={{ fontSize: '0.85rem', marginTop: 8 }}>
+                                    Generate a structure first to repair objection bundles.
+                                </div>
+                            )}
                         </div>
                         <div className="overview-title">
                             {editingKey === 'title' ? (
